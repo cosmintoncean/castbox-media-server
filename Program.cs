@@ -380,7 +380,7 @@ internal sealed class CastBoxForm : Form
     }
 
     // Change this to your GitHub owner/repository before publishing releases.
-    private const string GitHubRepository = "YOUR_GITHUB_USERNAME/castbox-media-server";
+    private const string GitHubRepository = "cosmintoncean/castbox-media-server";
     private const string CurrentVersion = "0.1.0";
 
     private async Task CheckForUpdatesAsync()
