@@ -1,0 +1,399 @@
+using System.Diagnostics;
+using System.Net;
+using System.Net.Http.Headers;
+using System.Net.NetworkInformation;
+using System.Net.Sockets;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+using Microsoft.AspNetCore.StaticFiles;
+
+namespace CastBox;
+
+internal static class Program
+{
+    [STAThread]
+    private static void Main()
+    {
+        ApplicationConfiguration.Initialize();
+        var launchInBackground = Environment.GetCommandLineArgs().Skip(1).Contains("--background", StringComparer.OrdinalIgnoreCase);
+        Application.Run(new CastBoxForm(launchInBackground));
+    }
+}
+
+internal sealed class CastBoxForm : Form
+{
+    private readonly string _dataDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CastBox");
+    private readonly string _configPath;
+    private readonly ListBox _folders = new() { Dock = DockStyle.Fill, IntegralHeight = false };
+    private readonly Label _status = new() { AutoSize = true, Text = "Server stopped" };
+    private readonly Label _address = new() { AutoSize = true, Text = "Not running" };
+    private readonly NumericUpDown _port = new() { Minimum = 1024, Maximum = 65535, Value = 5078, Width = 100 };
+    private readonly CheckBox _startWithWindows = new() { Text = "Start CastBox when I sign in to Windows", AutoSize = true };
+    private readonly Button _startStop = new() { Text = "Start server", AutoSize = true };
+    private readonly Button _firewall = new() { Text = "Configure Windows Firewall", AutoSize = true };
+    private readonly TextBox _log = new() { Dock = DockStyle.Fill, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical };
+    private WebApplication? _server;
+    private bool _loading;
+    private readonly bool _launchInBackground;
+    private readonly NotifyIcon _tray = new();
+    private static readonly Color BrandAmber = Color.FromArgb(255, 177, 57);
+
+    public CastBoxForm(bool launchInBackground)
+    {
+        _launchInBackground = launchInBackground;
+        _configPath = Path.Combine(_dataDir, "settings.json");
+        Directory.CreateDirectory(_dataDir);
+        Text = "CastBox Server";
+        Width = 760; Height = 650; MinimumSize = new Size(650, 550);
+        StartPosition = FormStartPosition.CenterScreen;
+        BackColor = Color.FromArgb(25, 27, 32); ForeColor = Color.FromArgb(245, 241, 230);
+        Font = new Font("Segoe UI", 10);
+        BuildLayout(); LoadSettings();
+        var trayMenu = new ContextMenuStrip();
+        trayMenu.Items.Add("Open CastBox", null, (_, _) => { Show(); WindowState = FormWindowState.Normal; Activate(); });
+        trayMenu.Items.Add("Stop server", null, async (_, _) => await StopServerAsync());
+        trayMenu.Items.Add("Exit", null, async (_, _) => { _tray.Visible = false; await StopServerAsync(); Close(); });
+        _tray.Text = "CastBox Server"; _tray.Icon = SystemIcons.Application; _tray.ContextMenuStrip = trayMenu;
+        _tray.DoubleClick += (_, _) => { Show(); WindowState = FormWindowState.Normal; Activate(); };
+        FormClosing += async (_, e) => { if (e.CloseReason == CloseReason.UserClosing && _server is not null) { e.Cancel = true; Hide(); _tray.Visible = true; _tray.ShowBalloonTip(1500, "CastBox is running", "The media server continues in the background.", ToolTipIcon.Info); } else { _tray.Visible = false; await StopServerAsync(); } };
+        Shown += async (_, _) => { if (_startWithWindows.Checked || _launchInBackground) await StartServerAsync(); if (_launchInBackground && _server is not null) { Hide(); _tray.Visible = true; } };
+    }
+
+    private void BuildLayout()
+    {
+        var menu = new MenuStrip { BackColor = BackColor, ForeColor = ForeColor, Dock = DockStyle.Top, Padding = new Padding(6, 4, 0, 4) };
+        var view = new ToolStripMenuItem("View");
+        var logs = new ToolStripMenuItem("Server log");
+        logs.Click += (_, _) => ShowLogWindow();
+        view.DropDownItems.Add(logs);
+        menu.Items.Add(view);
+        var updates = new ToolStripMenuItem("Updates");
+        var checkUpdates = new ToolStripMenuItem("Check for updates...");
+        checkUpdates.Click += async (_, _) => await CheckForUpdatesAsync();
+        updates.DropDownItems.Add(checkUpdates);
+        menu.Items.Add(updates);
+        MainMenuStrip = menu;
+        Controls.Add(menu);
+
+        var root = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5,
+            Padding = new Padding(20, 10, 20, 18), BackColor = BackColor,
+            GrowStyle = TableLayoutPanelGrowStyle.FixedSize
+        };
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 92));
+        root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 62));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 68));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 94));
+        Controls.Add(root);
+        menu.BringToFront();
+
+        var header = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, BackColor = BackColor, Margin = new Padding(0) };
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 82));
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        var logo = new PictureBox { Dock = DockStyle.Fill, SizeMode = PictureBoxSizeMode.Zoom, BackColor = BackColor, Margin = new Padding(0, 2, 14, 2) };
+        try
+        {
+            using var stream = typeof(Program).Assembly.GetManifestResourceStream("CastBox.castbox-logo.png");
+            if (stream is not null) { using var sourceImage = Image.FromStream(stream); logo.Image = new Bitmap(sourceImage); }
+        }
+        catch { }
+        header.Controls.Add(logo, 0, 0);
+        var title = new Label { Text = "CastBox\r\nYour home media server", Font = new Font("Segoe UI Semibold", 18), Dock = DockStyle.Fill, ForeColor = BrandAmber, TextAlign = ContentAlignment.MiddleLeft, Margin = new Padding(0) };
+        header.Controls.Add(title, 1, 0);
+        root.Controls.Add(header, 0, 0);
+
+        var foldersPanel = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 2, BackColor = BackColor, Margin = new Padding(0, 4, 0, 8) };
+        foldersPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        foldersPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 150));
+        foldersPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
+        foldersPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        foldersPanel.Controls.Add(new Label { Text = "Folders included in your TV library", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, Font = new Font("Segoe UI Semibold", 10) }, 0, 0);
+        var folderButtons = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, Margin = new Padding(0) };
+        folderButtons.RowStyles.Add(new RowStyle(SizeType.Percent, 50)); folderButtons.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
+        var add = MakeButton("+  Add folder"); add.Dock = DockStyle.Fill; add.Margin = new Padding(4, 2, 0, 2); add.Click += (_, _) => AddFolder();
+        var remove = MakeButton("Remove selected"); remove.Dock = DockStyle.Fill; remove.Margin = new Padding(4, 2, 0, 2);
+        remove.Click += (_, _) => { if (_folders.SelectedItem is string selected) { _folders.Items.Remove(selected); SaveSettings(); Log("Removed folder: " + selected); } };
+        folderButtons.Controls.Add(add, 0, 0); folderButtons.Controls.Add(remove, 0, 1);
+        foldersPanel.Controls.Add(folderButtons, 1, 0);
+        _folders.Dock = DockStyle.Fill; _folders.Margin = new Padding(0, 0, 0, 2);
+        _folders.BackColor = Color.FromArgb(32, 34, 40); _folders.ForeColor = ForeColor; _folders.BorderStyle = BorderStyle.FixedSingle;
+        foldersPanel.Controls.Add(_folders, 0, 1); foldersPanel.SetColumnSpan(_folders, 2);
+        root.Controls.Add(foldersPanel, 0, 1);
+
+        var setup = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 4, RowCount = 1, BackColor = BackColor, Margin = new Padding(0) };
+        setup.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 44));
+        setup.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 110));
+        setup.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 132));
+        setup.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        setup.Controls.Add(new Label { Text = "Port", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft }, 0, 0);
+        _port.Dock = DockStyle.Fill; _port.Margin = new Padding(0, 12, 8, 12); setup.Controls.Add(_port, 1, 0);
+        var save = MakeButton("Save settings"); save.Dock = DockStyle.Fill; save.Margin = new Padding(0, 8, 12, 8);
+        save.Click += (_, _) => { SaveSettings(); ApplyStartupSetting(); }; setup.Controls.Add(save, 2, 0);
+        _startWithWindows.Dock = DockStyle.Fill; _startWithWindows.Margin = new Padding(0, 0, 0, 0); setup.Controls.Add(_startWithWindows, 3, 0);
+        root.Controls.Add(setup, 0, 2);
+
+        var serverPanel = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1, BackColor = BackColor, Margin = new Padding(0) };
+        serverPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 150));
+        serverPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 205));
+        serverPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        StyleButton(_startStop, true); _startStop.Dock = DockStyle.Fill; _startStop.Margin = new Padding(0, 8, 8, 8);
+        _startStop.Click += async (_, _) => { if (_server is null) await StartServerAsync(); else await StopServerAsync(); };
+        _firewall.Text = "Configure firewall"; _firewall.Dock = DockStyle.Fill; _firewall.Margin = new Padding(0, 8, 8, 8); _firewall.Click += (_, _) => ConfigureFirewall();
+        _status.Dock = DockStyle.Fill; _status.TextAlign = ContentAlignment.MiddleLeft; _status.Margin = new Padding(2, 0, 0, 0);
+        serverPanel.Controls.Add(_startStop, 0, 0); serverPanel.Controls.Add(_firewall, 1, 0); serverPanel.Controls.Add(_status, 2, 0);
+        root.Controls.Add(serverPanel, 0, 3);
+
+        var bottom = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, BackColor = BackColor, Margin = new Padding(0, 4, 0, 0) };
+        bottom.RowStyles.Add(new RowStyle(SizeType.Absolute, 32)); bottom.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        bottom.Controls.Add(new Label { Text = "Connection address for your CastBox TV app", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, Font = new Font("Segoe UI Semibold", 10) }, 0, 0);
+        var addr = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, BackColor = BackColor, Margin = new Padding(0) };
+        addr.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); addr.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 136));
+        _address.ForeColor = BrandAmber; _address.Dock = DockStyle.Fill; _address.TextAlign = ContentAlignment.MiddleLeft; _address.Margin = new Padding(0);
+        var copy = MakeButton("Copy address"); copy.Dock = DockStyle.Fill; copy.Margin = new Padding(0, 2, 0, 2);
+        copy.Click += (_, _) => { if (_address.Text.StartsWith("http")) Clipboard.SetText(_address.Text); };
+        addr.Controls.Add(_address, 0, 0); addr.Controls.Add(copy, 1, 0); bottom.Controls.Add(addr, 0, 1);
+        root.Controls.Add(bottom, 0, 4);
+    }
+
+    private Button MakeButton(string text)
+    {
+        var b = new Button { Text = text, AutoSize = true, FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(48, 51, 59), ForeColor = Color.FromArgb(245, 241, 230), Padding = new Padding(8, 4, 8, 4), Margin = new Padding(4) };
+        b.FlatAppearance.BorderColor = Color.FromArgb(92, 96, 106); return b;
+    }
+    private void StyleButton(Button b, bool primary) { b.FlatStyle = FlatStyle.Flat; b.BackColor = primary ? Color.FromArgb(245, 155, 35) : Color.FromArgb(48, 51, 59); b.ForeColor = primary ? Color.FromArgb(25, 27, 32) : Color.FromArgb(245, 241, 230); b.Padding = new Padding(10, 5, 10, 5); }
+
+    private void AddFolder()
+    {
+        using var dialog = new FolderBrowserDialog { Description = "Choose a folder containing movies or TV episodes", UseDescriptionForTitle = true, ShowNewFolderButton = false };
+        if (dialog.ShowDialog(this) != DialogResult.OK) return;
+        if (!_folders.Items.Cast<string>().Any(x => string.Equals(x, dialog.SelectedPath, StringComparison.OrdinalIgnoreCase))) _folders.Items.Add(dialog.SelectedPath);
+        SaveSettings(); Log("Added folder: " + dialog.SelectedPath);
+    }
+
+    private void LoadSettings()
+    {
+        _loading = true;
+        try
+        {
+            if (File.Exists(_configPath))
+            {
+                var cfg = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(_configPath)) ?? new AppSettings();
+                _port.Value = Math.Clamp(cfg.Port, (int)_port.Minimum, (int)_port.Maximum);
+                foreach (var f in cfg.MediaFolders.Where(Directory.Exists)) _folders.Items.Add(f);
+                _startWithWindows.Checked = IsStartupEnabled();
+            }
+            else _startWithWindows.Checked = IsStartupEnabled();
+        }
+        catch (Exception ex) { Log("Could not load settings: " + ex.Message); }
+        finally { _loading = false; }
+    }
+    private void SaveSettings()
+    {
+        if (_loading) return;
+        try
+        {
+            var cfg = new AppSettings { Port = (int)_port.Value, MediaFolders = _folders.Items.Cast<string>().Distinct(StringComparer.OrdinalIgnoreCase).ToList() };
+            File.WriteAllText(_configPath, JsonSerializer.Serialize(cfg, new JsonSerializerOptions { WriteIndented = true }));
+            Log("Settings saved.");
+            if (_server is not null) Log("Restart the server to apply the changed port or folder list.");
+        }
+        catch (Exception ex) { MessageBox.Show(this, "Couldn't save settings: " + ex.Message, "CastBox", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+    }
+
+    private async Task StartServerAsync()
+    {
+        if (_server is not null) return;
+        SaveSettings();
+        if (_folders.Items.Count == 0) { MessageBox.Show(this, "Add at least one movie folder first.", "CastBox", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
+        try
+        {
+            var port = (int)_port.Value;
+            var builder = WebApplication.CreateBuilder(new WebApplicationOptions { ApplicationName = typeof(CastBoxForm).Assembly.FullName, ContentRootPath = AppContext.BaseDirectory, Args = Array.Empty<string>() });
+            builder.Logging.ClearProviders();
+            builder.WebHost.ConfigureKestrel(o => o.Listen(IPAddress.Any, port));
+            builder.Services.AddCors(o => o.AddDefaultPolicy(p => p.AllowAnyHeader().AllowAnyMethod().AllowAnyOrigin()));
+            var app = builder.Build(); app.UseCors();
+            var configuredFolders = _folders.Items.Cast<string>().ToList();
+            var supported = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".mp4", ".m4v", ".mov", ".mkv", ".avi", ".webm", ".mpeg", ".mpg", ".ts" };
+            var types = new FileExtensionContentTypeProvider();
+            string MakeId(string path) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(Path.GetFullPath(path))))[..24].ToLowerInvariant();
+            app.MapGet("/api/health", () => Results.Ok(new { status = "ok", name = "CastBox", folders = configuredFolders.Count }));
+            app.MapGet("/api/library", () =>
+            {
+                var files = new List<object>();
+                foreach (var root in configuredFolders)
+                {
+                    try
+                    {
+                        if (!Directory.Exists(root)) continue;
+                        foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
+                        {
+                            if (!supported.Contains(Path.GetExtension(file))) continue;
+                            var info = new FileInfo(file); var id = MakeId(file);
+                            files.Add(new { id, title = Path.GetFileNameWithoutExtension(file), fileName = info.Name, extension = Path.GetExtension(file).TrimStart('.').ToLowerInvariant(), folder = Path.GetDirectoryName(file), sizeBytes = info.Length, modifiedUtc = info.LastWriteTimeUtc, url = $"http://{GetLanIp()}:{port}/api/media/{id}" });
+                        }
+                    }
+                    catch { }
+                }
+                return Results.Ok(files);
+            });
+            app.MapGet("/api/media/{id}", async (string id, HttpContext ctx) =>
+            {
+                foreach (var root in configuredFolders)
+                {
+                    try
+                    {
+                        if (!Directory.Exists(root)) continue;
+                        foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
+                        {
+                            if (!supported.Contains(Path.GetExtension(file)) || !string.Equals(MakeId(file), id, StringComparison.OrdinalIgnoreCase)) continue;
+                            var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 131072, FileOptions.Asynchronous | FileOptions.SequentialScan);
+                            if (!types.TryGetContentType(file, out var mime)) mime = "application/octet-stream";
+                            if (Path.GetExtension(file).Equals(".mkv", StringComparison.OrdinalIgnoreCase)) mime = "video/x-matroska";
+                            return Results.File(stream, mime, enableRangeProcessing: true);
+                        }
+                    }
+                    catch { }
+                }
+                return Results.NotFound();
+            });
+            await app.StartAsync(); _server = app;
+            _status.Text = "Running"; _status.ForeColor = Color.LightGreen; _startStop.Text = "Stop server"; StyleButton(_startStop, false);
+            _address.Text = $"http://{GetLanIp()}:{port}"; Log("Server started at " + _address.Text);
+        }
+        catch (Exception ex) { _server = null; MessageBox.Show(this, "Couldn't start the server. Check whether the port is already in use.\n\n" + ex.Message, "CastBox", MessageBoxButtons.OK, MessageBoxIcon.Error); Log("Start failed: " + ex); }
+    }
+
+    private async Task StopServerAsync()
+    {
+        if (_server is null) return;
+        try { await _server.StopAsync(); await _server.DisposeAsync(); } catch { }
+        _server = null; _status.Text = "Server stopped"; _status.ForeColor = ForeColor; _startStop.Text = "Start server"; StyleButton(_startStop, true); _address.Text = "Not running"; Log("Server stopped.");
+    }
+
+    // Change this to your GitHub owner/repository before publishing releases.
+    private const string GitHubRepository = "YOUR_GITHUB_USERNAME/castbox-media-server";
+    private const string CurrentVersion = "0.1.0";
+
+    private async Task CheckForUpdatesAsync()
+    {
+        using var http = new HttpClient();
+        http.DefaultRequestHeaders.UserAgent.ParseAdd("CastBox-Updater/1.0");
+        http.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
+        try
+        {
+            var api = $"https://api.github.com/repos/{GitHubRepository}/releases/latest";
+            using var response = await http.GetAsync(api);
+            if (!response.IsSuccessStatusCode)
+            {
+                MessageBox.Show(this,
+                    response.StatusCode == HttpStatusCode.NotFound
+                        ? "No published release was found. Check that the GitHub repository is public and has a release, and update GitHubRepository in Program.cs."
+                        : $"GitHub returned {(int)response.StatusCode} ({response.ReasonPhrase}). Try again later.",
+                    "CastBox updates", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            var root = json.RootElement;
+            var tag = root.TryGetProperty("tag_name", out var tagElement) ? tagElement.GetString()?.TrimStart('v', 'V') : null;
+            var notes = root.TryGetProperty("body", out var bodyElement) ? bodyElement.GetString() : "";
+            if (string.IsNullOrWhiteSpace(tag) || !Version.TryParse(tag, out var latest))
+            {
+                MessageBox.Show(this, "The latest GitHub release has no valid version tag. Use tags such as v0.1.1.", "CastBox updates", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            if (!Version.TryParse(CurrentVersion, out var current)) current = new Version(0, 1, 0);
+            if (latest <= current)
+            {
+                MessageBox.Show(this, $"You're up to date. Installed version: {CurrentVersion}.", "CastBox updates", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            string? installerUrl = null;
+            if (root.TryGetProperty("assets", out var assets))
+                foreach (var asset in assets.EnumerateArray())
+                    if (asset.TryGetProperty("name", out var name) && string.Equals(name.GetString(), "CastBox-Setup.exe", StringComparison.OrdinalIgnoreCase) && asset.TryGetProperty("browser_download_url", out var url))
+                    { installerUrl = url.GetString(); break; }
+
+            if (string.IsNullOrWhiteSpace(installerUrl))
+            {
+                if (MessageBox.Show(this, $"Version {tag} is available, but the release doesn't contain CastBox-Setup.exe.\n\nOpen the release page to download it manually?", "CastBox updates", MessageBoxButtons.YesNo, MessageBoxIcon.Information) == DialogResult.Yes)
+                    Process.Start(new ProcessStartInfo($"https://github.com/{GitHubRepository}/releases/latest") { UseShellExecute = true });
+                return;
+            }
+
+            var prompt = $"CastBox {tag} is available (installed: {CurrentVersion}).\n\n{notes}\n\nDownload and launch the installer? CastBox will close during installation.";
+            if (MessageBox.Show(this, prompt, "CastBox update available", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+
+            var tempInstaller = Path.Combine(Path.GetTempPath(), "CastBox-Setup.exe");
+            using (var download = await http.GetAsync(installerUrl, HttpCompletionOption.ResponseHeadersRead))
+            {
+                download.EnsureSuccessStatusCode();
+                await using var destination = new FileStream(tempInstaller, FileMode.Create, FileAccess.Write, FileShare.None);
+                await download.Content.CopyToAsync(destination);
+            }
+            var start = new ProcessStartInfo(tempInstaller, "/SILENT /CLOSEAPPLICATIONS /RESTARTAPPLICATIONS") { UseShellExecute = true };
+            Process.Start(start);
+            await StopServerAsync();
+            _tray.Visible = false;
+            Close();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, "Couldn't check or download updates. Check your internet connection and GitHub release configuration.\n\n" + ex.Message, "CastBox updates", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            Log("Update check failed: " + ex.Message);
+        }
+    }
+
+    private void ConfigureFirewall()
+    {
+        try
+        {
+            var exe = Application.ExecutablePath;
+            var command = $"advfirewall firewall add rule name=\"CastBox Media Server TCP {(int)_port.Value}\" dir=in action=allow protocol=TCP localport={(int)_port.Value} profile=private";
+            var psi = new ProcessStartInfo("netsh.exe", command) { UseShellExecute = true, Verb = "runas" };
+            Process.Start(psi);
+            Log("Requested an administrator approval to add the private-network firewall rule for TCP " + (int)_port.Value + ".");
+            MessageBox.Show(this, "Windows may ask for administrator approval. Allow the CastBox port on private networks only.", "CastBox", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        catch (Exception ex) { MessageBox.Show(this, "Firewall setup couldn't be started: " + ex.Message, "CastBox", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+    }
+
+    private bool IsStartupEnabled()
+    {
+        try { using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run"); return key?.GetValue("CastBox") is string; } catch { return false; }
+    }
+    private void ApplyStartupSetting()
+    {
+        try
+        {
+            using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", true) ?? Microsoft.Win32.Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run");
+            if (_startWithWindows.Checked) key.SetValue("CastBox", "\"" + Application.ExecutablePath + "\" --background"); else key.DeleteValue("CastBox", false);
+            Log(_startWithWindows.Checked ? "CastBox will start when you sign in to Windows." : "Automatic startup disabled.");
+        }
+        catch (Exception ex) { MessageBox.Show(this, "Couldn't update startup setting: " + ex.Message, "CastBox", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+    }
+    private static string GetLanIp()
+    {
+        try
+        {
+            foreach (var ni in NetworkInterface.GetAllNetworkInterfaces().Where(n => n.OperationalStatus == OperationalStatus.Up && n.NetworkInterfaceType != NetworkInterfaceType.Loopback))
+                foreach (var ua in ni.GetIPProperties().UnicastAddresses)
+                    if (ua.Address.AddressFamily == AddressFamily.InterNetwork && !IPAddress.IsLoopback(ua.Address) && (ua.Address.ToString().StartsWith("192.168.") || ua.Address.ToString().StartsWith("10.") || ua.Address.ToString().StartsWith("172."))) return ua.Address.ToString();
+        } catch { }
+        return "127.0.0.1";
+    }
+    private void Log(string line) { if (_log.IsDisposed) return; _log.AppendText($"[{DateTime.Now:HH:mm:ss}] {line}{Environment.NewLine}"); }
+    private void ShowLogWindow()
+    {
+        var f = new Form { Text = "CastBox server log", Width = 700, Height = 400, StartPosition = FormStartPosition.CenterParent, BackColor = BackColor, ForeColor = ForeColor };
+        var copy = new TextBox { Dock = DockStyle.Fill, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Both, Text = _log.Text, BackColor = Color.FromArgb(18, 20, 24), ForeColor = ForeColor };
+        f.Controls.Add(copy); f.Show(this);
+    }
+    protected override void OnFormClosed(FormClosedEventArgs e) { base.OnFormClosed(e); _log.Dispose(); }
+    private sealed class AppSettings { public int Port { get; set; } = 5078; public List<string> MediaFolders { get; set; } = new(); }
+}
