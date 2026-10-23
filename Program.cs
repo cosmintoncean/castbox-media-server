@@ -6,6 +6,9 @@ using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Globalization;
+using System.Text.Json.Nodes;
+using CastBox.MediaLog;
 using Microsoft.AspNetCore.StaticFiles;
 
 namespace CastBox;
@@ -189,12 +192,25 @@ internal sealed class CastBoxForm : Form
     private static readonly Color BrandAmber = Color.FromArgb(255, 177, 57);
     private bool _darkMode = true;
     private MenuStrip? _mainMenu;
+    // MediaLog sync (docs/medialog-sync-design.md): marks what the TV finishes as watched in MediaLog.
+    private readonly MediaLogStore _mediaLogStore;
+    private readonly WatchSyncService _mediaLogService;
+    private readonly MediaLogConnector _mediaLogConnector;
+    private readonly CancellationTokenSource _syncCts = new();
+    private ToolStripMenuItem? _mediaLogMenu, _mlStatus, _mlConnect, _mlConfirm, _mlForget, _mlDisconnect;
 
     public CastBoxForm(bool launchInBackground)
     {
         _launchInBackground = launchInBackground;
         _configPath = Path.Combine(_dataDir, "settings.json");
         Directory.CreateDirectory(_dataDir);
+        var http = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
+        http.DefaultRequestHeaders.UserAgent.ParseAdd("CastBox/" + CurrentVersion);
+        var mediaLogClient = new HttpMediaLogClient(http);
+        _mediaLogStore = new MediaLogStore(Path.Combine(_dataDir, "medialog.json"), new DpapiProtector());
+        _mediaLogService = new WatchSyncService(_mediaLogStore, mediaLogClient, new TvMazeClient(http), log: LogAny);
+        _mediaLogConnector = new MediaLogConnector(_mediaLogStore, mediaLogClient, _mediaLogService);
+        _mediaLogService.Changed += () => { if (IsHandleCreated && !IsDisposed) { try { BeginInvoke(new Action(UpdateMediaLogMenu)); } catch (ObjectDisposedException) { } } };
         Text = "CastBox Server";
         try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath) ?? SystemIcons.Application; } catch { Icon = SystemIcons.Application; }
         Width = 1040; Height = 820; MinimumSize = new Size(900, 720);
@@ -208,8 +224,8 @@ internal sealed class CastBoxForm : Form
         trayMenu.Items.Add("Exit", null, async (_, _) => { _tray.Visible = false; await StopServerAsync(); Close(); });
         _tray.Text = "CastBox Server"; _tray.Icon = Icon; _tray.ContextMenuStrip = trayMenu;
         _tray.DoubleClick += (_, _) => { Show(); WindowState = FormWindowState.Normal; Activate(); };
-        FormClosing += async (_, e) => { if (e.CloseReason == CloseReason.UserClosing && _server is not null) { e.Cancel = true; Hide(); _tray.Visible = true; _tray.ShowBalloonTip(1500, "CastBox is running", "The media server continues in the background.", ToolTipIcon.Info); } else { _tray.Visible = false; await StopServerAsync(); } };
-        Shown += async (_, _) => { if (_startWithWindows.Checked || _launchInBackground) await StartServerAsync(); if (_launchInBackground && _server is not null) { Hide(); _tray.Visible = true; } };
+        FormClosing += async (_, e) => { if (e.CloseReason == CloseReason.UserClosing && _server is not null) { e.Cancel = true; Hide(); _tray.Visible = true; _tray.ShowBalloonTip(1500, "CastBox is running", "The media server continues in the background.", ToolTipIcon.Info); } else { _syncCts.Cancel(); _tray.Visible = false; await StopServerAsync(); } };
+        Shown += async (_, _) => { _ = Task.Run(() => _mediaLogService.RunAsync(_syncCts.Token)); UpdateMediaLogMenu(); if (_startWithWindows.Checked || _launchInBackground) await StartServerAsync(); if (_launchInBackground && _server is not null) { Hide(); _tray.Visible = true; } };
     }
 
     private void BuildLayout()
@@ -235,6 +251,7 @@ internal sealed class CastBoxForm : Form
         checkUpdates.Click += async (_, _) => await CheckForUpdatesAsync();
         updates.DropDownItems.Add(checkUpdates);
         menu.Items.Add(updates);
+        BuildMediaLogMenu(menu);
         MainMenuStrip = menu;
         Controls.Add(menu);
 
@@ -358,6 +375,7 @@ internal sealed class CastBoxForm : Form
         _log.BackColor = PanelSurface;
         _log.ForeColor = TextPrimary;
         _address.ForeColor = BrandAmber;
+        UpdateMediaLogMenu();
         Invalidate(true);
     }
 
@@ -450,6 +468,20 @@ internal sealed class CastBoxForm : Form
             var supported = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".mp4", ".m4v", ".mov", ".mkv", ".avi", ".webm", ".mpeg", ".mpg", ".ts" };
             var types = new FileExtensionContentTypeProvider();
             string MakeId(string path) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(Path.GetFullPath(path))))[..24].ToLowerInvariant();
+            string? FindFile(string id)
+            {
+                foreach (var root in configuredFolders)
+                {
+                    try
+                    {
+                        if (!Directory.Exists(root)) continue;
+                        foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
+                            if (supported.Contains(Path.GetExtension(file)) && string.Equals(MakeId(file), id, StringComparison.OrdinalIgnoreCase)) return file;
+                    }
+                    catch { }
+                }
+                return null;
+            }
             app.MapGet("/api/health", () => Results.Ok(new { status = "ok", name = "CastBox", folders = configuredFolders.Count, serverId = _serverId }));
             app.MapGet("/api/library", () =>
             {
@@ -493,6 +525,36 @@ internal sealed class CastBoxForm : Form
                 }
                 return Results.NotFound();
             });
+            // The TV reports that it finished a file; MediaLog gets it in the background (MediaLog/WatchSyncService.cs).
+            app.MapPost("/api/watched", async (HttpContext ctx) =>
+            {
+                if (ctx.Request.ContentLength is > 4096) return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
+                JsonNode? body;
+                try
+                {
+                    using var reader = new StreamReader(ctx.Request.Body, Encoding.UTF8);
+                    var text = await reader.ReadToEndAsync();
+                    if (text.Length > 4096) return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
+                    body = JsonNode.Parse(text);
+                }
+                catch (JsonException) { return Results.BadRequest(new { error = "invalid_json" }); }
+                if (body is not JsonObject o) return Results.BadRequest(new { error = "invalid_json" });
+                if ((string?)o["event"] != "completed") return Results.BadRequest(new { error = "unsupported_event" });
+                var mediaId = (string?)o["id"]; var eventId = (string?)o["clientEventId"];
+                if (string.IsNullOrWhiteSpace(mediaId) || string.IsNullOrWhiteSpace(eventId) || eventId.Length > 100) return Results.BadRequest(new { error = "invalid_request" });
+                var at = DateTimeOffset.TryParse((string?)o["at"], CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var parsed) ? parsed.UtcDateTime : DateTime.UtcNow;
+                if (at > DateTime.UtcNow.AddMinutes(5)) at = DateTime.UtcNow;
+                var file = FindFile(mediaId);
+                if (file is null) return Results.NotFound(new { error = "unknown_media" });
+                try
+                {
+                    var result = _mediaLogService.Enqueue(mediaId, file, at, eventId);
+                    return result == EnqueueResult.Invalid
+                        ? Results.BadRequest(new { error = "invalid_request" })
+                        : Results.Accepted(value: new { status = result == EnqueueResult.Accepted ? "queued" : "ignored" });
+                }
+                catch (Exception ex) { LogAny("Couldn't queue a watch: " + ex.Message); return Results.StatusCode(StatusCodes.Status500InternalServerError); }
+            });
             await app.StartAsync(); _server = app;
             _status.Text = "Running"; _status.ForeColor = Color.LightGreen; _startStop.Text = "Stop server"; _startStop.Glyph = "\u25A0"; StyleButton(_startStop, false);
             _address.Text = $"http://{GetLanIp()}:{port}"; Log("Server started at " + _address.Text);
@@ -509,7 +571,7 @@ internal sealed class CastBoxForm : Form
 
     // Change this to your GitHub owner/repository before publishing releases.
     private const string GitHubRepository = "cosmintoncean/castbox-media-server";
-    private const string CurrentVersion = "0.1.6";
+    private const string CurrentVersion = "0.2.0";
 
     private async Task CheckForUpdatesAsync()
     {
@@ -620,6 +682,57 @@ internal sealed class CastBoxForm : Form
         } catch { }
         return "127.0.0.1";
     }
+    /// <summary>Log from any thread (the MediaLog worker runs in the background).</summary>
+    private void LogAny(string line)
+    {
+        if (IsDisposed) return;
+        if (!InvokeRequired) { Log(line); return; }
+        try { BeginInvoke(new Action(() => Log(line))); } catch (ObjectDisposedException) { }
+    }
+
+    private void BuildMediaLogMenu(MenuStrip menu)
+    {
+        _mediaLogMenu = new ToolStripMenuItem("MediaLog");
+        _mlStatus = new ToolStripMenuItem("Not connected") { Enabled = false };
+        _mlConnect = new ToolStripMenuItem("Connect to MediaLog...");
+        _mlConnect.Click += (_, _) => { using var dialog = new MediaLogConnectDialog(_mediaLogConnector, _mediaLogStore.Read(s => s.Address)); dialog.ShowDialog(this); UpdateMediaLogMenu(); };
+        _mlConfirm = new ToolStripMenuItem("Needs confirmation...");
+        _mlConfirm.Click += (_, _) => { using var dialog = new MediaLogConfirmDialog(_mediaLogService); dialog.ShowDialog(this); UpdateMediaLogMenu(); };
+        _mlForget = new ToolStripMenuItem("Forget saved choices");
+        _mlForget.Click += (_, _) =>
+        {
+            if (MessageBox.Show(this, "Forget which MediaLog titles you confirmed and the show lookups CastBox saved? They will be worked out again next time.", "CastBox", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes) _mediaLogService.ForgetSavedChoices();
+        };
+        _mlDisconnect = new ToolStripMenuItem("Disconnect");
+        _mlDisconnect.Click += async (_, _) => await DisconnectMediaLogAsync();
+        _mediaLogMenu.DropDownItems.AddRange(new ToolStripItem[] { _mlStatus, new ToolStripSeparator(), _mlConnect, _mlConfirm, _mlForget, new ToolStripSeparator(), _mlDisconnect });
+        menu.Items.Add(_mediaLogMenu);
+    }
+
+    private async Task DisconnectMediaLogAsync()
+    {
+        if (MessageBox.Show(this, "Disconnect CastBox from MediaLog? Watches still waiting to be sent are forgotten. You can connect again any time.", "CastBox", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+        try { await _mediaLogConnector.DisconnectAsync(CancellationToken.None); }
+        catch (MediaLogException ex) { MessageBox.Show(this, "CastBox is disconnected here, but MediaLog couldn't be told: " + ex.Message, "CastBox", MessageBoxButtons.OK, MessageBoxIcon.Information); }
+        UpdateMediaLogMenu();
+    }
+
+    /// <summary>Status line and badge: how many watches wait for you, or that MediaLog needs reconnecting.</summary>
+    private void UpdateMediaLogMenu()
+    {
+        if (_mediaLogMenu is null || _mlStatus is null || _mlConnect is null || _mlConfirm is null || _mlDisconnect is null) return;
+        var s = _mediaLogService.Snapshot();
+        _mlStatus.Text = !s.Connected ? "Not connected"
+            : s.NeedsReconnect ? "MediaLog no longer accepts this PC: reconnect"
+            : $"Connected: {s.Label ?? "MediaLog"}  ·  {s.SentToday} sent today  ·  {s.Waiting} waiting";
+        _mlConnect.Text = s.NeedsReconnect ? "Reconnect..." : s.Connected ? "Connect again..." : "Connect to MediaLog...";
+        _mlConfirm.Text = s.NeedsConfirmation > 0 ? $"Needs confirmation ({s.NeedsConfirmation})..." : "Needs confirmation...";
+        _mlConfirm.Enabled = s.Connected; _mlDisconnect.Enabled = s.Connected;
+        var attention = s.NeedsConfirmation > 0 || s.NeedsReconnect;
+        _mediaLogMenu.Text = s.NeedsConfirmation > 0 ? $"MediaLog ({s.NeedsConfirmation})" : s.NeedsReconnect ? "MediaLog (!)" : "MediaLog";
+        _mediaLogMenu.ForeColor = attention ? BrandAmber : TextPrimary;
+    }
+
     private void Log(string line) { if (_log.IsDisposed) return; _log.AppendText($"[{DateTime.Now:HH:mm:ss}] {line}{Environment.NewLine}"); }
     private void ShowLogWindow()
     {

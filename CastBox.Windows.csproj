@@ -11,6 +11,12 @@
     <RootNamespace>CastBox</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
+    <!-- The test project lives in tests/ and must not be compiled into the app. -->
+    <Compile Remove="tests\**" />
+    <EmbeddedResource Remove="tests\**" />
+    <None Remove="tests\**" />
+  </ItemGroup>
+  <ItemGroup>
     <EmbeddedResource Include="castbox-logo.png" LogicalName="CastBox.castbox-logo.png" />
     <EmbeddedResource Include="CastBox.ico" LogicalName="CastBox.CastBox.ico" />
   </ItemGroup>
