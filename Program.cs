@@ -459,7 +459,10 @@ internal sealed class CastBoxForm : Form
                         {
                             if (!supported.Contains(Path.GetExtension(file))) continue;
                             var info = new FileInfo(file); var id = MakeId(file);
-                            files.Add(new { id, title = Path.GetFileNameWithoutExtension(file), fileName = info.Name, extension = Path.GetExtension(file).TrimStart('.').ToLowerInvariant(), folder = Path.GetDirectoryName(file), sizeBytes = info.Length, modifiedUtc = info.LastWriteTimeUtc, url = $"http://{GetLanIp()}:{port}/api/media/{id}" });
+                            // rootName/relativeFolder let clients rebuild the folder tree without the PC's absolute paths.
+                            var rootName = Path.GetFileName(root.TrimEnd('\\', '/')); if (rootName.Length == 0) rootName = root.TrimEnd('\\', '/');
+                            var relativeFolder = Path.GetRelativePath(root, Path.GetDirectoryName(file) ?? root).Replace('\\', '/'); if (relativeFolder == ".") relativeFolder = "";
+                            files.Add(new { id, title = Path.GetFileNameWithoutExtension(file), fileName = info.Name, extension = Path.GetExtension(file).TrimStart('.').ToLowerInvariant(), folder = Path.GetDirectoryName(file), rootName, relativeFolder, sizeBytes = info.Length, modifiedUtc = info.LastWriteTimeUtc, url = $"http://{GetLanIp()}:{port}/api/media/{id}" });
                         }
                     }
                     catch { }
