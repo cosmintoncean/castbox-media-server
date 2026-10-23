@@ -12,5 +12,6 @@
   </PropertyGroup>
   <ItemGroup>
     <EmbeddedResource Include="castbox-logo.png" LogicalName="CastBox.castbox-logo.png" />
+    <EmbeddedResource Include="CastBox.ico" LogicalName="CastBox.CastBox.ico" />
   </ItemGroup>
 </Project>

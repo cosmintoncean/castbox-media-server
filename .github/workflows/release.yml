@@ -41,7 +41,7 @@ jobs:
         run: |
           $version = "${{ github.ref_name }}".TrimStart('v')
           $iss = Get-Content installer/CastBox.iss -Raw
-          $iss = $iss.Replace('#define MyAppVersion "0.1.0"', "#define MyAppVersion `"$version`"")
+          $iss = [regex]::Replace($iss, '#define MyAppVersion "[^"]+"', "#define MyAppVersion `"$version`"")
           Set-Content installer/CastBox-release.iss $iss
           iscc installer/CastBox-release.iss
 

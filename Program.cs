@@ -21,31 +21,152 @@ internal static class Program
     }
 }
 
+internal static class RoundedShape
+{
+    public static System.Drawing.Drawing2D.GraphicsPath Create(Rectangle rect, int diameter)
+    {
+        diameter = Math.Max(2, Math.Min(diameter, Math.Min(rect.Width, rect.Height)));
+        var path = new System.Drawing.Drawing2D.GraphicsPath();
+        path.AddArc(rect.X, rect.Y, diameter, diameter, 180, 90);
+        path.AddArc(rect.Right - diameter, rect.Y, diameter, diameter, 270, 90);
+        path.AddArc(rect.Right - diameter, rect.Bottom - diameter, diameter, diameter, 0, 90);
+        path.AddArc(rect.X, rect.Bottom - diameter, diameter, diameter, 90, 90);
+        path.CloseFigure();
+        return path;
+    }
+}
+
 internal sealed class RoundedButton : Button
 {
+    private static readonly Color Amber = Color.FromArgb(255, 177, 57);
     public bool Primary { get; set; }
+    public string Glyph { get; set; } = "";
+
+    public RoundedButton()
+    {
+        SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true);
+    }
+
     protected override void OnPaint(PaintEventArgs e)
     {
-        e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-        var rect = ClientRectangle;
-        rect.Width -= 1; rect.Height -= 1;
-        const int radius = 14;
-        using var path = new System.Drawing.Drawing2D.GraphicsPath();
-        path.AddArc(rect.X, rect.Y, radius, radius, 180, 90);
-        path.AddArc(rect.Right - radius, rect.Y, radius, radius, 270, 90);
-        path.AddArc(rect.Right - radius, rect.Bottom - radius, radius, radius, 0, 90);
-        path.AddArc(rect.X, rect.Bottom - radius, radius, radius, 90, 90);
-        path.CloseFigure();
-        using var fill = new SolidBrush(BackColor);
-        e.Graphics.FillPath(fill, path);
+        var g = e.Graphics;
+        g.Clear(Parent?.BackColor ?? BackColor);
+        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        var rect = new Rectangle(1, 1, Width - 3, Height - 3);
+        using var path = RoundedShape.Create(rect, (int)(rect.Height * 0.6));
+        using (var fill = new SolidBrush(BackColor)) g.FillPath(fill, path);
         if (!Primary)
         {
-            using var pen = new Pen(Color.FromArgb(200, 255, 177, 57), 1.2f);
-            e.Graphics.DrawPath(pen, path);
+            using var pen = new Pen(Amber, 1.5f);
+            g.DrawPath(pen, path);
         }
-        TextRenderer.DrawText(e.Graphics, Text, Font, rect, ForeColor,
-            TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+        if (Focused && ShowFocusCues)
+        {
+            using var ring = new Pen(Color.White, 2f);
+            g.DrawPath(ring, path);
+        }
+
+        const TextFormatFlags measure = TextFormatFlags.NoPadding | TextFormatFlags.SingleLine;
+        using var glyphFont = new Font("Segoe MDL2 Assets", Font.Size + 1.5f);
+        var glyphSize = Glyph.Length > 0 ? TextRenderer.MeasureText(g, Glyph, glyphFont, Size.Empty, measure) : Size.Empty;
+        var textSize = TextRenderer.MeasureText(g, Text, Font, Size.Empty, measure);
+        int gap = Glyph.Length > 0 ? 12 : 0;
+        int x = (Width - (glyphSize.Width + gap + textSize.Width)) / 2;
+        if (Glyph.Length > 0)
+        {
+            TextRenderer.DrawText(g, Glyph, glyphFont, new Rectangle(x, 0, glyphSize.Width, Height), ForeColor,
+                TextFormatFlags.NoPadding | TextFormatFlags.VerticalCenter | TextFormatFlags.Left);
+            x += glyphSize.Width + gap;
+        }
+        TextRenderer.DrawText(g, Text, Font, new Rectangle(x, 0, Width - x, Height), ForeColor,
+            TextFormatFlags.NoPadding | TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.EndEllipsis);
     }
+}
+
+internal sealed class RoundedPanel : Panel
+{
+    public RoundedPanel() { SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true); }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = e.Graphics;
+        g.Clear(Parent?.BackColor ?? BackColor);
+        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        using var path = RoundedShape.Create(new Rectangle(0, 0, Width - 1, Height - 1), 20);
+        using (var fill = new SolidBrush(BackColor)) g.FillPath(fill, path);
+        using var pen = new Pen(Color.FromArgb(110, 128, 128, 140), 1.2f);
+        g.DrawPath(pen, path);
+    }
+}
+
+internal sealed class StatusLabel : Label
+{
+    public StatusLabel() { Padding = new Padding(26, 0, 0, 0); }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        base.OnPaint(e);
+        e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        using var brush = new SolidBrush(ForeColor);
+        e.Graphics.FillEllipse(brush, 2, (Height - 14) / 2, 14, 14);
+    }
+}
+
+internal sealed class BrandHeader : Control
+{
+    private readonly Image? _icon;
+    private static readonly Color Amber = Color.FromArgb(255, 177, 57);
+
+    public BrandHeader()
+    {
+        SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+        try
+        {
+            using var stream = typeof(Program).Assembly.GetManifestResourceStream("CastBox.CastBox.ico");
+            if (stream is not null) { using var icon = new Icon(stream, new Size(256, 256)); _icon = KeyOutDarkBackground(icon.ToBitmap()); }
+        }
+        catch { }
+    }
+
+    // The app icon sits on a near-black tile; fade those pixels out so the artwork blends into any theme.
+    private static Bitmap KeyOutDarkBackground(Bitmap source)
+    {
+        var result = new Bitmap(source.Width, source.Height, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        for (int y = 0; y < source.Height; y++)
+            for (int x = 0; x < source.Width; x++)
+            {
+                var c = source.GetPixel(x, y);
+                double keep = Math.Clamp((Math.Max(c.R, Math.Max(c.G, c.B)) - 24) / 48.0, 0, 1);
+                result.SetPixel(x, y, Color.FromArgb((int)(c.A * keep), c.R, c.G, c.B));
+            }
+        source.Dispose();
+        return result;
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = e.Graphics;
+        g.Clear(BackColor);
+        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+        int size = Math.Min(Height, 112);
+        int top = (Height - size) / 2;
+        if (_icon is not null) g.DrawImage(_icon, new Rectangle(0, top, size, size));
+        int textX = size + 14;
+        const TextFormatFlags flags = TextFormatFlags.NoPadding | TextFormatFlags.SingleLine;
+        using var wordFont = new Font("Segoe UI", 40f, FontStyle.Bold, GraphicsUnit.Point);
+        using var tagFont = new Font("Segoe UI Semibold", 16f, FontStyle.Regular, GraphicsUnit.Point);
+        var cast = TextRenderer.MeasureText(g, "Cast", wordFont, Size.Empty, flags);
+        var wordHeight = cast.Height;
+        var tagHeight = TextRenderer.MeasureText(g, "Your home media server", tagFont, Size.Empty, flags).Height;
+        int y = top + (size - (wordHeight + tagHeight)) / 2;
+        TextRenderer.DrawText(g, "Cast", wordFont, new Point(textX, y), ForeColor, flags);
+        TextRenderer.DrawText(g, "Box", wordFont, new Point(textX + cast.Width - 6, y), Amber, flags);
+        var muted = Color.FromArgb((ForeColor.R * 7 + BackColor.R * 3) / 10, (ForeColor.G * 7 + BackColor.G * 3) / 10, (ForeColor.B * 7 + BackColor.B * 3) / 10);
+        TextRenderer.DrawText(g, "Your home media server", tagFont, new Point(textX + 4, y + wordHeight - 4), muted, flags);
+    }
+
+    protected override void Dispose(bool disposing) { if (disposing) _icon?.Dispose(); base.Dispose(disposing); }
 }
 
 internal sealed class CastBoxForm : Form
@@ -53,12 +174,12 @@ internal sealed class CastBoxForm : Form
     private readonly string _dataDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CastBox");
     private readonly string _configPath;
     private readonly ListBox _folders = new() { Dock = DockStyle.Fill, IntegralHeight = false };
-    private readonly Label _status = new() { AutoSize = true, Text = "Server stopped" };
-    private readonly Label _address = new() { AutoSize = true, Text = "Not running" };
-    private readonly NumericUpDown _port = new() { Minimum = 1024, Maximum = 65535, Value = 5078, Width = 100 };
+    private readonly Label _status = new StatusLabel { Text = "Server stopped" };
+    private readonly Label _address = new() { AutoSize = false, Text = "Not running", Font = new Font("Segoe UI Semibold", 16), Padding = new Padding(18, 0, 0, 0) };
+    private readonly NumericUpDown _port = new() { Minimum = 1024, Maximum = 65535, Value = 5078, Width = 100, Font = new Font("Segoe UI", 11), BorderStyle = BorderStyle.FixedSingle };
     private readonly CheckBox _startWithWindows = new() { Text = "Start CastBox when I sign in to Windows", AutoSize = true };
-    private readonly Button _startStop = new() { Text = "Start server", AutoSize = true };
-    private readonly Button _firewall = new() { Text = "Configure Windows Firewall", AutoSize = true };
+    private readonly RoundedButton _startStop = new() { Text = "Start server", Glyph = "\uE768" };
+    private readonly RoundedButton _firewall = new() { Text = "Configure firewall", Glyph = "\uEA18" };
     private readonly TextBox _log = new() { Dock = DockStyle.Fill, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical };
     private WebApplication? _server;
     private bool _loading;
@@ -122,84 +243,84 @@ internal sealed class CastBoxForm : Form
             Padding = new Padding(20, 10, 20, 18), BackColor = BackColor,
             GrowStyle = TableLayoutPanelGrowStyle.FixedSize
         };
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 126));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 130));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 76));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 82));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 116));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 136));
         Controls.Add(root);
         menu.BringToFront();
 
         var header = new Panel { Dock = DockStyle.Fill, BackColor = BackColor, Margin = new Padding(0) };
-        var logo = new PictureBox { Dock = DockStyle.Fill, SizeMode = PictureBoxSizeMode.Zoom, BackColor = BackColor, Margin = new Padding(0), Padding = new Padding(0) };
-        try
-        {
-            using var stream = typeof(Program).Assembly.GetManifestResourceStream("CastBox.castbox-logo.png");
-            if (stream is not null) { using var sourceImage = Image.FromStream(stream); logo.Image = new Bitmap(sourceImage); }
-        }
-        catch { }
-        header.Controls.Add(logo);
+        header.Controls.Add(new BrandHeader { Dock = DockStyle.Fill, BackColor = BackColor, ForeColor = ForeColor });
         root.Controls.Add(header, 0, 0);
 
         var foldersPanel = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 2, BackColor = BackColor, Margin = new Padding(0, 4, 0, 8) };
         foldersPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         foldersPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 190));
-        foldersPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 88));
+        foldersPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 96));
         foldersPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        foldersPanel.Controls.Add(new Label { Text = "Folders included in your TV library", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, Font = new Font("Segoe UI Semibold", 10) }, 0, 0);
+        foldersPanel.Controls.Add(new Label { Text = "Folders included in your TV library", Dock = DockStyle.Fill, TextAlign = ContentAlignment.BottomLeft, Padding = new Padding(0, 0, 0, 10), Font = new Font("Segoe UI Semibold", 12) }, 0, 0);
         var folderButtons = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, Margin = new Padding(0) };
-        folderButtons.RowStyles.Add(new RowStyle(SizeType.Absolute, 42)); folderButtons.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
-        var add = MakeButton("+  Add folder"); add.Dock = DockStyle.Fill; add.Margin = new Padding(4, 1, 0, 1); add.Click += (_, _) => AddFolder();
-        var remove = MakeButton("Remove selected"); remove.Dock = DockStyle.Fill; remove.Margin = new Padding(4, 1, 0, 1);
+        folderButtons.RowStyles.Add(new RowStyle(SizeType.Absolute, 46)); folderButtons.RowStyles.Add(new RowStyle(SizeType.Absolute, 46));
+        var add = MakeButton("Add folder"); add.Glyph = "\uE710"; add.Dock = DockStyle.Fill; add.Margin = new Padding(4, 2, 0, 2); add.Click += (_, _) => AddFolder();
+        var remove = MakeButton("Remove folder"); remove.Glyph = "\uE738"; remove.Dock = DockStyle.Fill; remove.Margin = new Padding(4, 2, 0, 2);
         remove.Click += (_, _) => { if (_folders.SelectedItem is string selected) { _folders.Items.Remove(selected); SaveSettings(); Log("Removed folder: " + selected); } };
         folderButtons.Controls.Add(add, 0, 0); folderButtons.Controls.Add(remove, 0, 1);
         foldersPanel.Controls.Add(folderButtons, 1, 0);
-        _folders.Dock = DockStyle.Fill; _folders.Margin = new Padding(0, 0, 0, 2);
-        _folders.BackColor = Color.FromArgb(32, 34, 40); _folders.ForeColor = ForeColor; _folders.BorderStyle = BorderStyle.FixedSingle;
-        foldersPanel.Controls.Add(_folders, 0, 1); foldersPanel.SetColumnSpan(_folders, 2);
+        var folderBox = new RoundedPanel { Dock = DockStyle.Fill, Margin = new Padding(0, 0, 0, 2), Padding = new Padding(16, 12, 16, 12), BackColor = Color.FromArgb(32, 34, 40) };
+        _folders.Dock = DockStyle.Fill; _folders.Font = new Font("Segoe UI", 11);
+        _folders.BackColor = Color.FromArgb(32, 34, 40); _folders.ForeColor = ForeColor; _folders.BorderStyle = BorderStyle.None;
+        folderBox.Controls.Add(_folders);
+        foldersPanel.Controls.Add(folderBox, 0, 1); foldersPanel.SetColumnSpan(folderBox, 2);
         root.Controls.Add(foldersPanel, 0, 1);
 
         var setup = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 4, RowCount = 1, BackColor = BackColor, Margin = new Padding(0) };
+        setup.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         setup.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 44));
         setup.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 110));
-        setup.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 132));
+        setup.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 170));
         setup.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        setup.Controls.Add(new Label { Text = "Port", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft }, 0, 0);
-        _port.Dock = DockStyle.Fill; _port.Margin = new Padding(0, 12, 8, 12); setup.Controls.Add(_port, 1, 0);
-        var save = MakeButton("Save settings"); save.Dock = DockStyle.Fill; save.Margin = new Padding(0, 8, 12, 8);
+        setup.Controls.Add(new Label { Text = "Port", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, Font = new Font("Segoe UI", 11) }, 0, 0);
+        _port.Dock = DockStyle.None; _port.Anchor = AnchorStyles.Left | AnchorStyles.Right; _port.Margin = new Padding(0, 22, 8, 0); setup.Controls.Add(_port, 1, 0);
+        var save = MakeButton("Save settings"); StyleButton(save, true); save.Dock = DockStyle.Fill; save.Margin = new Padding(0, 8, 20, 8);
         save.Click += (_, _) => { SaveSettings(); ApplyStartupSetting(); }; setup.Controls.Add(save, 2, 0);
         _startWithWindows.Dock = DockStyle.Fill; _startWithWindows.Margin = new Padding(0, 0, 0, 0); setup.Controls.Add(_startWithWindows, 3, 0);
         root.Controls.Add(setup, 0, 2);
 
         var serverPanel = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1, BackColor = BackColor, Margin = new Padding(0) };
-        serverPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 150));
-        serverPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 205));
+        serverPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        serverPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 220));
+        serverPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 250));
         serverPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        StyleButton(_startStop, true); _startStop.Dock = DockStyle.Fill; _startStop.Margin = new Padding(0, 8, 8, 8);
+        StyleButton(_startStop, true); _startStop.Dock = DockStyle.Fill; _startStop.Margin = new Padding(0, 8, 14, 8);
         _startStop.Click += async (_, _) => { if (_server is null) await StartServerAsync(); else await StopServerAsync(); };
-        _firewall.Text = "Configure firewall"; _firewall.Dock = DockStyle.Fill; _firewall.Margin = new Padding(0, 8, 8, 8); _firewall.Click += (_, _) => ConfigureFirewall();
-        _status.Dock = DockStyle.Fill; _status.TextAlign = ContentAlignment.MiddleLeft; _status.Margin = new Padding(2, 0, 0, 0);
+        StyleButton(_firewall, false); _firewall.Dock = DockStyle.Fill; _firewall.Margin = new Padding(0, 8, 14, 8); _firewall.Click += (_, _) => ConfigureFirewall();
+        _status.Dock = DockStyle.Fill; _status.TextAlign = ContentAlignment.MiddleLeft; _status.Margin = new Padding(2, 0, 0, 0); _status.Font = new Font("Segoe UI Semibold", 12);
         serverPanel.Controls.Add(_startStop, 0, 0); serverPanel.Controls.Add(_firewall, 1, 0); serverPanel.Controls.Add(_status, 2, 0);
         root.Controls.Add(serverPanel, 0, 3);
 
         var bottom = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, BackColor = BackColor, Margin = new Padding(0, 4, 0, 0) };
-        bottom.RowStyles.Add(new RowStyle(SizeType.Absolute, 32)); bottom.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        bottom.Controls.Add(new Label { Text = "Connection address for your CastBox TV app", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, Font = new Font("Segoe UI Semibold", 10) }, 0, 0);
+        bottom.RowStyles.Add(new RowStyle(SizeType.Absolute, 36)); bottom.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        bottom.Controls.Add(new Label { Text = "Connection address for your CastBox TV app", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, Font = new Font("Segoe UI Semibold", 12) }, 0, 0);
         var addr = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, BackColor = BackColor, Margin = new Padding(0) };
-        addr.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); addr.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 136));
+        addr.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        addr.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); addr.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 200));
+        var addrBox = new RoundedPanel { Dock = DockStyle.Fill, Margin = new Padding(0, 2, 14, 6), Padding = new Padding(2), BackColor = PanelSurface };
         _address.ForeColor = BrandAmber; _address.Dock = DockStyle.Fill; _address.TextAlign = ContentAlignment.MiddleLeft; _address.Margin = new Padding(0);
-        var copy = MakeButton("Copy address"); copy.Dock = DockStyle.Fill; copy.Margin = new Padding(0, 2, 0, 2);
+        addrBox.Controls.Add(_address);
+        var copy = MakeButton("Copy address"); StyleButton(copy, true); copy.Glyph = "\uE8C8"; copy.Dock = DockStyle.Fill; copy.Margin = new Padding(0, 2, 0, 6);
         copy.Click += (_, _) => { if (_address.Text.StartsWith("http")) Clipboard.SetText(_address.Text); };
-        addr.Controls.Add(_address, 0, 0); addr.Controls.Add(copy, 1, 0); bottom.Controls.Add(addr, 0, 1);
+        addr.Controls.Add(addrBox, 0, 0); addr.Controls.Add(copy, 1, 0); bottom.Controls.Add(addr, 0, 1);
         root.Controls.Add(bottom, 0, 4);
     }
 
     private Color Surface => _darkMode ? Color.FromArgb(25, 27, 32) : Color.FromArgb(247, 247, 244);
     private Color PanelSurface => _darkMode ? Color.FromArgb(32, 34, 40) : Color.White;
     private Color TextPrimary => _darkMode ? Color.FromArgb(245, 241, 230) : Color.FromArgb(35, 37, 42);
-    private Color ButtonSurface => _darkMode ? Color.FromArgb(48, 51, 59) : Color.FromArgb(235, 235, 230);
+    private Color ButtonSurface => _darkMode ? Color.FromArgb(50, 38, 22) : Color.FromArgb(235, 235, 230);
 
-    private Button MakeButton(string text)
+    private RoundedButton MakeButton(string text)
     {
         var b = new RoundedButton { Text = text, AutoSize = false, Height = 46, MinimumSize = new Size(100, 42),
             FlatStyle = FlatStyle.Flat, BackColor = ButtonSurface, ForeColor = BrandAmber,
@@ -246,7 +367,7 @@ internal sealed class CastBoxForm : Form
             control.BackColor = Surface;
             control.ForeColor = TextPrimary;
             if (control is TableLayoutPanel or Panel or GroupBox) control.BackColor = Surface;
-            if (control is ListBox or TextBox) control.BackColor = PanelSurface;
+            if (control is ListBox or TextBox or RoundedPanel || control.Parent is RoundedPanel) control.BackColor = PanelSurface;
             if (control is RoundedButton button)
             {
                 button.BackColor = button.Primary ? BrandAmber : ButtonSurface;
@@ -366,7 +487,7 @@ internal sealed class CastBoxForm : Form
                 return Results.NotFound();
             });
             await app.StartAsync(); _server = app;
-            _status.Text = "Running"; _status.ForeColor = Color.LightGreen; _startStop.Text = "Stop server"; StyleButton(_startStop, false);
+            _status.Text = "Running"; _status.ForeColor = Color.LightGreen; _startStop.Text = "Stop server"; _startStop.Glyph = "\u25A0"; StyleButton(_startStop, false);
             _address.Text = $"http://{GetLanIp()}:{port}"; Log("Server started at " + _address.Text);
         }
         catch (Exception ex) { _server = null; MessageBox.Show(this, "Couldn't start the server. Check whether the port is already in use.\n\n" + ex.Message, "CastBox", MessageBoxButtons.OK, MessageBoxIcon.Error); Log("Start failed: " + ex); }
@@ -376,12 +497,12 @@ internal sealed class CastBoxForm : Form
     {
         if (_server is null) return;
         try { await _server.StopAsync(); await _server.DisposeAsync(); } catch { }
-        _server = null; _status.Text = "Server stopped"; _status.ForeColor = ForeColor; _startStop.Text = "Start server"; StyleButton(_startStop, true); _address.Text = "Not running"; Log("Server stopped.");
+        _server = null; _status.Text = "Server stopped"; _status.ForeColor = ForeColor; _startStop.Text = "Start server"; _startStop.Glyph = "\uE768"; StyleButton(_startStop, true); _address.Text = "Not running"; Log("Server stopped.");
     }
 
     // Change this to your GitHub owner/repository before publishing releases.
     private const string GitHubRepository = "cosmintoncean/castbox-media-server";
-    private const string CurrentVersion = "0.1.0";
+    private const string CurrentVersion = "0.1.4";
 
     private async Task CheckForUpdatesAsync()
     {

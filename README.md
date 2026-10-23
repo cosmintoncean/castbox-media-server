@@ -1,4 +1,11 @@
+# CastBox Media Server
 
+Windows desktop app (.NET 8, WinForms with embedded Kestrel) that serves video files from chosen folders to the CastBox Android TV app over HTTP on the home LAN.
+
+- Settings: `%LOCALAPPDATA%\CastBox\settings.json` (port, default 5078, and media folders).
+- Endpoints: `/api/health`, `/api/library`, `/api/media/{id}` (see `docs/api-contracts.md` in the CastBox workspace).
+- Build: `dotnet build CastBox.Windows.csproj -c Release`. Publish with `.\Build-CastBox.ps1`; build the installer with `.\Build-Installer.ps1` (needs Inno Setup 6).
+- There is no authentication. Use only on a trusted LAN.
 
 ## Appearance
 
