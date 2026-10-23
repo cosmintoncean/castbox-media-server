@@ -183,6 +183,7 @@ internal sealed class CastBoxForm : Form
     private readonly TextBox _log = new() { Dock = DockStyle.Fill, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical };
     private WebApplication? _server;
     private bool _loading;
+    private string _serverId = "";
     private readonly bool _launchInBackground;
     private readonly NotifyIcon _tray = new();
     private static readonly Color BrandAmber = Color.FromArgb(255, 177, 57);
@@ -407,6 +408,7 @@ internal sealed class CastBoxForm : Form
             if (File.Exists(_configPath))
             {
                 var cfg = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(_configPath)) ?? new AppSettings();
+                _serverId = cfg.ServerId ?? "";
                 _port.Value = Math.Clamp(cfg.Port, (int)_port.Minimum, (int)_port.Maximum);
                 foreach (var f in cfg.MediaFolders.Where(Directory.Exists)) _folders.Items.Add(f);
                 _startWithWindows.Checked = IsStartupEnabled();
@@ -415,13 +417,15 @@ internal sealed class CastBoxForm : Form
         }
         catch (Exception ex) { Log("Could not load settings: " + ex.Message); }
         finally { _loading = false; }
+        // A permanent ID lets the TV app find this PC again after its network address changes.
+        if (string.IsNullOrEmpty(_serverId)) { _serverId = Guid.NewGuid().ToString("N"); SaveSettings(); }
     }
     private void SaveSettings()
     {
         if (_loading) return;
         try
         {
-            var cfg = new AppSettings { Port = (int)_port.Value, MediaFolders = _folders.Items.Cast<string>().Distinct(StringComparer.OrdinalIgnoreCase).ToList() };
+            var cfg = new AppSettings { Port = (int)_port.Value, ServerId = _serverId, MediaFolders = _folders.Items.Cast<string>().Distinct(StringComparer.OrdinalIgnoreCase).ToList() };
             File.WriteAllText(_configPath, JsonSerializer.Serialize(cfg, new JsonSerializerOptions { WriteIndented = true }));
             Log("Settings saved.");
             if (_server is not null) Log("Restart the server to apply the changed port or folder list.");
@@ -446,7 +450,7 @@ internal sealed class CastBoxForm : Form
             var supported = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".mp4", ".m4v", ".mov", ".mkv", ".avi", ".webm", ".mpeg", ".mpg", ".ts" };
             var types = new FileExtensionContentTypeProvider();
             string MakeId(string path) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(Path.GetFullPath(path))))[..24].ToLowerInvariant();
-            app.MapGet("/api/health", () => Results.Ok(new { status = "ok", name = "CastBox", folders = configuredFolders.Count }));
+            app.MapGet("/api/health", () => Results.Ok(new { status = "ok", name = "CastBox", folders = configuredFolders.Count, serverId = _serverId }));
             app.MapGet("/api/library", () =>
             {
                 var files = new List<object>();
@@ -505,7 +509,7 @@ internal sealed class CastBoxForm : Form
 
     // Change this to your GitHub owner/repository before publishing releases.
     private const string GitHubRepository = "cosmintoncean/castbox-media-server";
-    private const string CurrentVersion = "0.1.5";
+    private const string CurrentVersion = "0.1.6";
 
     private async Task CheckForUpdatesAsync()
     {
@@ -624,5 +628,5 @@ internal sealed class CastBoxForm : Form
         f.Controls.Add(copy); f.Show(this);
     }
     protected override void OnFormClosed(FormClosedEventArgs e) { base.OnFormClosed(e); _log.Dispose(); }
-    private sealed class AppSettings { public int Port { get; set; } = 5078; public List<string> MediaFolders { get; set; } = new(); }
+    private sealed class AppSettings { public int Port { get; set; } = 5078; public string? ServerId { get; set; } public List<string> MediaFolders { get; set; } = new(); }
 }
