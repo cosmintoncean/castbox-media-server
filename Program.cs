@@ -483,6 +483,12 @@ internal sealed class CastBoxForm : Form
                 return null;
             }
             app.MapGet("/api/health", () => Results.Ok(new { status = "ok", name = "CastBox", folders = configuredFolders.Count, serverId = _serverId }));
+            // Which MediaLog account this PC reports to, so the TV can ask "who's watching?" when PCs differ.
+            app.MapGet("/api/medialog", () =>
+            {
+                var s = _mediaLogService.Snapshot();
+                return Results.Ok(new { connected = s.Connected && !s.NeedsReconnect, accountId = s.AccountId, username = s.Username, label = s.Label });
+            });
             app.MapGet("/api/library", () =>
             {
                 var files = new List<object>();
@@ -544,7 +550,8 @@ internal sealed class CastBoxForm : Form
                 if (string.IsNullOrWhiteSpace(mediaId) || string.IsNullOrWhiteSpace(eventId) || eventId.Length > 100) return Results.BadRequest(new { error = "invalid_request" });
                 var at = DateTimeOffset.TryParse((string?)o["at"], CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var parsed) ? parsed.UtcDateTime : DateTime.UtcNow;
                 if (at > DateTime.UtcNow.AddMinutes(5)) at = DateTime.UtcNow;
-                var file = FindFile(mediaId);
+                // A file from another PC (the person chose this PC's account) comes with its path, used only to work out the title.
+                var file = FindFile(mediaId) ?? ((string?)o["path"] is { Length: > 0 and <= 600 } hint ? hint : null);
                 if (file is null) return Results.NotFound(new { error = "unknown_media" });
                 try
                 {
@@ -724,7 +731,7 @@ internal sealed class CastBoxForm : Form
         var s = _mediaLogService.Snapshot();
         _mlStatus.Text = !s.Connected ? "Not connected"
             : s.NeedsReconnect ? "MediaLog no longer accepts this PC: reconnect"
-            : $"Connected: {s.Label ?? "MediaLog"}  ·  {s.SentToday} sent today  ·  {s.Waiting} waiting";
+            : $"Connected: {(s.Username is { } u ? "@" + u : s.Label ?? "MediaLog")}  ·  {s.SentToday} sent today  ·  {s.Waiting} waiting";
         _mlConnect.Text = s.NeedsReconnect ? "Reconnect..." : s.Connected ? "Connect again..." : "Connect to MediaLog...";
         _mlConfirm.Text = s.NeedsConfirmation > 0 ? $"Needs confirmation ({s.NeedsConfirmation})..." : "Needs confirmation...";
         _mlConfirm.Enabled = s.Connected; _mlDisconnect.Enabled = s.Connected;

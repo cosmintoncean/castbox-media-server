@@ -22,6 +22,9 @@ public sealed record WatchRequest(
 
 public enum LogOutcome { Logged, AlreadyLogged, NeedsConfirmation, NotFound, EpisodeNotFound, Rejected, Unauthorized, RateLimited, Unavailable }
 
+/// <summary>Who a connection belongs to. <see cref="AccountId"/> is MediaLog's opaque stable id for the account.</summary>
+public sealed record WhoAmI(string Label, string? Username, string? AccountId);
+
 public sealed record LogResult(LogOutcome Outcome, IReadOnlyList<Candidate>? Candidates = null, string? Message = null);
 
 /// <summary>The MediaLog `apps` function (docs/medialog-sync-design.md, MediaLog ADR 0011).</summary>
@@ -32,7 +35,7 @@ public interface IMediaLogClient
     Task<PairStart> PairStartAsync(Discovery discovery, string label, CancellationToken ct);
     Task<PairPoll> PairPollAsync(Discovery discovery, string deviceCode, CancellationToken ct);
     /// <summary>The connection's label, or throws <see cref="MediaLogException"/> if the token was revoked.</summary>
-    Task<string> WhoAmIAsync(Discovery discovery, string token, CancellationToken ct);
+    Task<WhoAmI> WhoAmIAsync(Discovery discovery, string token, CancellationToken ct);
     Task RevokeAsync(Discovery discovery, string token, CancellationToken ct);
     Task<LogResult> LogWatchAsync(Discovery discovery, string token, WatchRequest request, CancellationToken ct);
 }
@@ -101,12 +104,13 @@ public sealed class HttpMediaLogClient : IMediaLogClient
         return new PairPoll(kind, kind == PairStatus.Approved ? (string?)json["token"] : null);
     }
 
-    public async Task<string> WhoAmIAsync(Discovery discovery, string token, CancellationToken ct)
+    public async Task<WhoAmI> WhoAmIAsync(Discovery discovery, string token, CancellationToken ct)
     {
         var (status, json) = await PostAsync(discovery, token, new JsonObject { ["action"] = "whoami" }, ct).ConfigureAwait(false);
         if (status == HttpStatusCode.Unauthorized) throw new MediaLogException("MediaLog no longer accepts this connection. Connect again.");
         if (status != HttpStatusCode.OK || json is null) throw Failure(status, json, "check the connection");
-        return (string?)json["label"] ?? "CastBox";
+        var username = (string?)json["username"];
+        return new WhoAmI((string?)json["label"] ?? "CastBox", string.IsNullOrWhiteSpace(username) ? null : username, (string?)json["accountId"]);
     }
 
     public async Task RevokeAsync(Discovery discovery, string token, CancellationToken ct)

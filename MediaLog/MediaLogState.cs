@@ -82,6 +82,9 @@ public sealed class MediaLogState
     public string? TokenProtected { get; set; }
     /// <summary>What MediaLog calls this connection, e.g. "CastBox on COma".</summary>
     public string? Label { get; set; }
+    /// <summary>The MediaLog username of the connected account (null if the person hasn't chosen one) and its opaque id.</summary>
+    public string? Username { get; set; }
+    public string? AccountId { get; set; }
     public Dictionary<string, Mapping> Mappings { get; set; } = new();
     /// <summary>TVmaze answers by normalised show title, so each show is looked up once.</summary>
     public Dictionary<string, MediaIds> ShowIds { get; set; } = new();

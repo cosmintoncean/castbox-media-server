@@ -137,10 +137,10 @@ public class HttpMediaLogClientTests
     }
 
     [Fact]
-    public async Task Whoami_sends_the_token_as_a_bearer_and_returns_the_label()
+    public async Task Whoami_sends_the_token_as_a_bearer_and_returns_the_label_username_and_account()
     {
-        _handler.Respond = (_, _) => ScriptedHandler.Json(HttpStatusCode.OK, """{"label":"CastBox on COma","scopes":["log_watches"]}""");
-        Assert.Equal("CastBox on COma", await _client.WhoAmIAsync(D, "mla_abc", CancellationToken.None));
+        _handler.Respond = (_, _) => ScriptedHandler.Json(HttpStatusCode.OK, """{"label":"CastBox on COma","scopes":["log_watches"],"username":"ana","accountId":"0123456789abcdef"}""");
+        Assert.Equal(new WhoAmI("CastBox on COma", "ana", "0123456789abcdef"), await _client.WhoAmIAsync(D, "mla_abc", CancellationToken.None));
         Assert.Equal("Bearer mla_abc", _handler.Calls.Single().Request.Headers.Authorization!.ToString());
     }
 

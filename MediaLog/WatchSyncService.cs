@@ -10,7 +10,7 @@ public enum EnqueueResult
 }
 
 public sealed record SyncSnapshot(
-    bool Connected, bool NeedsReconnect, string? Label, string? Address,
+    bool Connected, bool NeedsReconnect, string? Label, string? Address, string? Username, string? AccountId,
     int Waiting, int NeedsConfirmation, int SentToday, IReadOnlyList<QueuedWatch> NeedsConfirmationItems);
 
 /// <summary>
@@ -62,7 +62,7 @@ public sealed class WatchSyncService
         {
             var today = Now.ToLocalTime().Date;
             var confirm = s.Queue.Where(q => q.State == WatchState.NeedsConfirmation).Select(Clone).ToList();
-            return new SyncSnapshot(connected, _needsReconnect, s.Label, s.Address,
+            return new SyncSnapshot(connected, _needsReconnect, s.Label, s.Address, s.Username, s.AccountId,
                 s.Queue.Count(q => q.State == WatchState.Pending), confirm.Count,
                 s.Recent.Count(r => r.SentAtUtc.ToLocalTime().Date == today), confirm);
         });
@@ -121,8 +121,27 @@ public sealed class WatchSyncService
     }
 
     /// <summary>Runs until cancelled: processes the queue now, whenever something changes, and every 30 seconds.</summary>
+    /// <summary>Learns (or re-learns) which MediaLog account this connection belongs to, e.g. after an update or a username change. Failures are ignored; the sync path notices a revoked token itself.</summary>
+    public async Task RefreshAccountAsync(CancellationToken ct)
+    {
+        var token = _store.GetToken();
+        var discovery = _store.Read(s => s.FunctionsUrl is { } f && s.AnonKey is { } a ? new Discovery(f, a) : null);
+        if (token is null || discovery is null) return;
+        WhoAmI who;
+        try { who = await _mediaLog.WhoAmIAsync(discovery, token, ct).ConfigureAwait(false); }
+        catch (Exception ex) when (ex is MediaLogException or HttpRequestException or TaskCanceledException && !ct.IsCancellationRequested) { return; }
+        var changed = _store.Update(s =>
+        {
+            if (s.TokenProtected is null || (s.Username == who.Username && s.AccountId == who.AccountId && s.Label == who.Label)) return false;
+            s.Label = who.Label; s.Username = who.Username; s.AccountId = who.AccountId;
+            return true;
+        });
+        if (changed) Changed?.Invoke();
+    }
+
     public async Task RunAsync(CancellationToken ct)
     {
+        await RefreshAccountAsync(ct).ConfigureAwait(false);
         while (!ct.IsCancellationRequested)
         {
             try { await ProcessDueAsync(ct).ConfigureAwait(false); }
@@ -295,7 +314,7 @@ public sealed class WatchSyncService
     /// <summary>Forgets the connection and what was waiting for it.</summary>
     public void Disconnected()
     {
-        _store.Update(s => { s.TokenProtected = null; s.Label = null; s.FunctionsUrl = null; s.AnonKey = null; s.Queue.Clear(); });
+        _store.Update(s => { s.TokenProtected = null; s.Label = null; s.Username = null; s.AccountId = null; s.FunctionsUrl = null; s.AnonKey = null; s.Queue.Clear(); });
         _needsReconnect = false;
         Changed?.Invoke();
     }
@@ -363,8 +382,8 @@ public sealed class MediaLogConnector
             var poll = await _client.PairPollAsync(discovery, pairing.DeviceCode, ct).ConfigureAwait(false);
             if (poll.Status == PairStatus.Approved && poll.Token is not null)
             {
-                var label = await SafeLabelAsync(discovery, poll.Token, ct).ConfigureAwait(false);
-                _store.Update(s => { s.FunctionsUrl = discovery.FunctionsUrl; s.AnonKey = discovery.AnonKey; s.Label = label; });
+                var who = await SafeWhoAmIAsync(discovery, poll.Token, ct).ConfigureAwait(false);
+                _store.Update(s => { s.FunctionsUrl = discovery.FunctionsUrl; s.AnonKey = discovery.AnonKey; s.Label = who.Label; s.Username = who.Username; s.AccountId = who.AccountId; });
                 _store.SetToken(poll.Token);
                 _service.ConnectionChanged();
                 return PairStatus.Approved;
@@ -378,10 +397,10 @@ public sealed class MediaLogConnector
         return PairStatus.Expired;
     }
 
-    private async Task<string> SafeLabelAsync(Discovery discovery, string token, CancellationToken ct)
+    private async Task<WhoAmI> SafeWhoAmIAsync(Discovery discovery, string token, CancellationToken ct)
     {
         try { return await _client.WhoAmIAsync(discovery, token, ct).ConfigureAwait(false); }
-        catch (MediaLogException) { return "CastBox"; }
+        catch (MediaLogException) { return new WhoAmI("CastBox", null, null); }
     }
 
     /// <summary>Tells MediaLog to revoke the token (best effort), then forgets it here.</summary>

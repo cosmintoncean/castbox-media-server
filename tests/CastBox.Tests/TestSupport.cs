@@ -34,6 +34,8 @@ public sealed class FakeMediaLog : IMediaLogClient
     public List<string> Tokens { get; } = new();
     public Queue<PairPoll> Polls { get; } = new();
     public string Label { get; set; } = "CastBox on TESTPC";
+    public string? Username { get; set; } = "ana";
+    public string? AccountId { get; set; } = "acc-ana";
     public bool WhoAmIFails { get; set; }
     public bool RevokeFails { get; set; }
     public int Revoked { get; private set; }
@@ -45,8 +47,8 @@ public sealed class FakeMediaLog : IMediaLogClient
     public Task<PairStart> PairStartAsync(Discovery discovery, string label, CancellationToken ct) => Task.FromResult(Pairing);
     public Task<PairPoll> PairPollAsync(Discovery discovery, string deviceCode, CancellationToken ct) =>
         Task.FromResult(Polls.Count > 0 ? Polls.Dequeue() : new PairPoll(PairStatus.Pending, null));
-    public Task<string> WhoAmIAsync(Discovery discovery, string token, CancellationToken ct) =>
-        WhoAmIFails ? throw new MediaLogException("revoked") : Task.FromResult(Label);
+    public Task<WhoAmI> WhoAmIAsync(Discovery discovery, string token, CancellationToken ct) =>
+        WhoAmIFails ? throw new MediaLogException("revoked") : Task.FromResult(new WhoAmI(Label, Username, AccountId));
     public Task RevokeAsync(Discovery discovery, string token, CancellationToken ct)
     {
         Revoked++;
