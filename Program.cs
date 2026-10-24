@@ -9,6 +9,7 @@ using System.Text.Json;
 using System.Globalization;
 using System.Text.Json.Nodes;
 using CastBox.MediaLog;
+using CastBox.Personal;
 using Microsoft.AspNetCore.StaticFiles;
 
 namespace CastBox;
@@ -177,6 +178,8 @@ internal sealed class CastBoxForm : Form
     private readonly string _dataDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CastBox");
     private readonly string _configPath;
     private readonly ListBox _folders = new() { Dock = DockStyle.Fill, IntegralHeight = false };
+    // Pictures and videos that are shown on their own on the TV (no poster lookup, no MediaLog).
+    private readonly ListBox _personal = new() { Dock = DockStyle.Fill, IntegralHeight = false };
     private readonly Label _status = new StatusLabel { Text = "Server stopped" };
     private readonly Label _address = new() { AutoSize = false, Text = "Not running", Font = new Font("Segoe UI Semibold", 16), Padding = new Padding(18, 0, 0, 0) };
     private readonly NumericUpDown _port = new() { Minimum = 1024, Maximum = 65535, Value = 5078, Width = 100, Font = new Font("Segoe UI", 11), BorderStyle = BorderStyle.FixedSingle };
@@ -213,7 +216,7 @@ internal sealed class CastBoxForm : Form
         _mediaLogService.Changed += () => { if (IsHandleCreated && !IsDisposed) { try { BeginInvoke(new Action(UpdateMediaLogMenu)); } catch (ObjectDisposedException) { } } };
         Text = "CastBox Server";
         try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath) ?? SystemIcons.Application; } catch { Icon = SystemIcons.Application; }
-        Width = 1040; Height = 820; MinimumSize = new Size(900, 720);
+        Width = 1040; Height = 960; MinimumSize = new Size(900, 840);
         StartPosition = FormStartPosition.CenterScreen;
         BackColor = Color.FromArgb(25, 27, 32); ForeColor = Color.FromArgb(245, 241, 230);
         Font = new Font("Segoe UI", 10);
@@ -273,24 +276,11 @@ internal sealed class CastBoxForm : Form
         header.Controls.Add(new BrandHeader { Dock = DockStyle.Fill, BackColor = BackColor, ForeColor = ForeColor });
         root.Controls.Add(header, 0, 0);
 
-        var foldersPanel = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 2, BackColor = BackColor, Margin = new Padding(0, 4, 0, 8) };
-        foldersPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        foldersPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 190));
-        foldersPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 96));
-        foldersPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        foldersPanel.Controls.Add(new Label { Text = "Folders included in your TV library", Dock = DockStyle.Fill, TextAlign = ContentAlignment.BottomLeft, Padding = new Padding(0, 0, 0, 10), Font = new Font("Segoe UI Semibold", 12) }, 0, 0);
-        var folderButtons = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, Margin = new Padding(0) };
-        folderButtons.RowStyles.Add(new RowStyle(SizeType.Absolute, 46)); folderButtons.RowStyles.Add(new RowStyle(SizeType.Absolute, 46));
-        var add = MakeButton("Add folder"); add.Glyph = "\uE710"; add.Dock = DockStyle.Fill; add.Margin = new Padding(4, 2, 0, 2); add.Click += (_, _) => AddFolder();
-        var remove = MakeButton("Remove folder"); remove.Glyph = "\uE738"; remove.Dock = DockStyle.Fill; remove.Margin = new Padding(4, 2, 0, 2);
-        remove.Click += (_, _) => { if (_folders.SelectedItem is string selected) { _folders.Items.Remove(selected); SaveSettings(); Log("Removed folder: " + selected); } };
-        folderButtons.Controls.Add(add, 0, 0); folderButtons.Controls.Add(remove, 0, 1);
-        foldersPanel.Controls.Add(folderButtons, 1, 0);
-        var folderBox = new RoundedPanel { Dock = DockStyle.Fill, Margin = new Padding(0, 0, 0, 2), Padding = new Padding(16, 12, 16, 12), BackColor = Color.FromArgb(32, 34, 40) };
-        _folders.Dock = DockStyle.Fill; _folders.Font = new Font("Segoe UI", 11);
-        _folders.BackColor = Color.FromArgb(32, 34, 40); _folders.ForeColor = ForeColor; _folders.BorderStyle = BorderStyle.None;
-        folderBox.Controls.Add(_folders);
-        foldersPanel.Controls.Add(folderBox, 0, 1); foldersPanel.SetColumnSpan(folderBox, 2);
+        var foldersPanel = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, BackColor = BackColor, Margin = new Padding(0) };
+        foldersPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 58));
+        foldersPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 42));
+        foldersPanel.Controls.Add(BuildFolderSection("Folders included in your TV library", "Add folder", "Remove folder", _folders, "Choose a folder containing movies or TV episodes"), 0, 0);
+        foldersPanel.Controls.Add(BuildFolderSection("Personal folders (pictures and videos, shown separately on the TV)", "Add personal folder", "Remove personal folder", _personal, "Choose a folder with your own pictures or videos"), 0, 1);
         root.Controls.Add(foldersPanel, 0, 1);
 
         var setup = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 4, RowCount = 1, BackColor = BackColor, Margin = new Padding(0) };
@@ -372,6 +362,8 @@ internal sealed class CastBoxForm : Form
         }
         _folders.BackColor = PanelSurface;
         _folders.ForeColor = TextPrimary;
+        _personal.BackColor = PanelSurface;
+        _personal.ForeColor = TextPrimary;
         _log.BackColor = PanelSurface;
         _log.ForeColor = TextPrimary;
         _address.ForeColor = BrandAmber;
@@ -410,12 +402,40 @@ internal sealed class CastBoxForm : Form
             foreach (ToolStripItem child in menuItem.DropDownItems) ApplyThemeToMenuItem(child);
     }
 
-    private void AddFolder()
+    /// <summary>A titled list of folders with Add and Remove buttons; used for the movie folders and the personal folders.</summary>
+    private Control BuildFolderSection(string title, string addText, string removeText, ListBox list, string pickerText)
     {
-        using var dialog = new FolderBrowserDialog { Description = "Choose a folder containing movies or TV episodes", UseDescriptionForTitle = true, ShowNewFolderButton = false };
+        var panel = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 2, BackColor = BackColor, Margin = new Padding(0, 4, 0, 8) };
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 250));
+        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 52));
+        panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        panel.Controls.Add(new Label { Text = title, Dock = DockStyle.Fill, TextAlign = ContentAlignment.BottomLeft, Padding = new Padding(0, 0, 0, 8), Font = new Font("Segoe UI Semibold", 12) }, 0, 0);
+        var buttons = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = new Padding(0) };
+        buttons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50)); buttons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+        var add = MakeButton(addText.Replace(" personal", "")); add.Glyph = "\uE710"; add.Dock = DockStyle.Fill; add.Margin = new Padding(4, 2, 0, 2);
+        add.Click += (_, _) => AddFolder(list, pickerText);
+        var remove = MakeButton("Remove"); remove.Glyph = "\uE738"; remove.Dock = DockStyle.Fill; remove.Margin = new Padding(4, 2, 0, 2);
+        remove.Click += (_, _) => { if (list.SelectedItem is string selected) { list.Items.Remove(selected); SaveSettings(); Log(removeText + ": " + selected); } };
+        buttons.Controls.Add(add, 0, 0); buttons.Controls.Add(remove, 1, 0);
+        panel.Controls.Add(buttons, 1, 0);
+        var box = new RoundedPanel { Dock = DockStyle.Fill, Margin = new Padding(0, 0, 0, 2), Padding = new Padding(16, 10, 16, 10), BackColor = Color.FromArgb(32, 34, 40) };
+        list.Dock = DockStyle.Fill; list.Font = new Font("Segoe UI", 11);
+        list.BackColor = Color.FromArgb(32, 34, 40); list.ForeColor = ForeColor; list.BorderStyle = BorderStyle.None;
+        box.Controls.Add(list);
+        panel.Controls.Add(box, 0, 1); panel.SetColumnSpan(box, 2);
+        return panel;
+    }
+
+    private void AddFolder(ListBox list, string pickerText)
+    {
+        using var dialog = new FolderBrowserDialog { Description = pickerText, UseDescriptionForTitle = true, ShowNewFolderButton = false };
         if (dialog.ShowDialog(this) != DialogResult.OK) return;
-        if (!_folders.Items.Cast<string>().Any(x => string.Equals(x, dialog.SelectedPath, StringComparison.OrdinalIgnoreCase))) _folders.Items.Add(dialog.SelectedPath);
-        SaveSettings(); Log("Added folder: " + dialog.SelectedPath);
+        // A folder can be in one list only, so the TV never shows the same files twice.
+        _folders.Items.Remove(_folders.Items.Cast<string>().FirstOrDefault(x => string.Equals(x, dialog.SelectedPath, StringComparison.OrdinalIgnoreCase)) ?? "");
+        _personal.Items.Remove(_personal.Items.Cast<string>().FirstOrDefault(x => string.Equals(x, dialog.SelectedPath, StringComparison.OrdinalIgnoreCase)) ?? "");
+        list.Items.Add(dialog.SelectedPath);
+        SaveSettings(); Log((ReferenceEquals(list, _personal) ? "Added personal folder: " : "Added folder: ") + dialog.SelectedPath);
     }
 
     private void LoadSettings()
@@ -429,6 +449,7 @@ internal sealed class CastBoxForm : Form
                 _serverId = cfg.ServerId ?? "";
                 _port.Value = Math.Clamp(cfg.Port, (int)_port.Minimum, (int)_port.Maximum);
                 foreach (var f in cfg.MediaFolders.Where(Directory.Exists)) _folders.Items.Add(f);
+                foreach (var f in cfg.PersonalFolders.Where(Directory.Exists)) _personal.Items.Add(f);
                 _startWithWindows.Checked = IsStartupEnabled();
             }
             else _startWithWindows.Checked = IsStartupEnabled();
@@ -443,7 +464,7 @@ internal sealed class CastBoxForm : Form
         if (_loading) return;
         try
         {
-            var cfg = new AppSettings { Port = (int)_port.Value, ServerId = _serverId, MediaFolders = _folders.Items.Cast<string>().Distinct(StringComparer.OrdinalIgnoreCase).ToList() };
+            var cfg = new AppSettings { Port = (int)_port.Value, ServerId = _serverId, MediaFolders = _folders.Items.Cast<string>().Distinct(StringComparer.OrdinalIgnoreCase).ToList(), PersonalFolders = _personal.Items.Cast<string>().Distinct(StringComparer.OrdinalIgnoreCase).ToList() };
             File.WriteAllText(_configPath, JsonSerializer.Serialize(cfg, new JsonSerializerOptions { WriteIndented = true }));
             Log("Settings saved.");
             if (_server is not null) Log("Restart the server to apply the changed port or folder list.");
@@ -455,7 +476,7 @@ internal sealed class CastBoxForm : Form
     {
         if (_server is not null) return;
         SaveSettings();
-        if (_folders.Items.Count == 0) { MessageBox.Show(this, "Add at least one movie folder first.", "CastBox", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
+        if (_folders.Items.Count == 0 && _personal.Items.Count == 0) { MessageBox.Show(this, "Add at least one folder first.", "CastBox", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
         try
         {
             var port = (int)_port.Value;
@@ -465,6 +486,7 @@ internal sealed class CastBoxForm : Form
             builder.Services.AddCors(o => o.AddDefaultPolicy(p => p.AllowAnyHeader().AllowAnyMethod().AllowAnyOrigin()));
             var app = builder.Build(); app.UseCors();
             var configuredFolders = _folders.Items.Cast<string>().ToList();
+            var personalFolders = _personal.Items.Cast<string>().ToList();
             var supported = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".mp4", ".m4v", ".mov", ".mkv", ".avi", ".webm", ".mpeg", ".mpg", ".ts" };
             var types = new FileExtensionContentTypeProvider();
             string MakeId(string path) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(Path.GetFullPath(path))))[..24].ToLowerInvariant();
@@ -482,7 +504,7 @@ internal sealed class CastBoxForm : Form
                 }
                 return null;
             }
-            app.MapGet("/api/health", () => Results.Ok(new { status = "ok", name = "CastBox", folders = configuredFolders.Count, serverId = _serverId }));
+            app.MapGet("/api/health", () => Results.Ok(new { status = "ok", name = "CastBox", folders = configuredFolders.Count, personalFolders = personalFolders.Count, serverId = _serverId }));
             // Which MediaLog account this PC reports to, so the TV can ask "who's watching?" when PCs differ.
             app.MapGet("/api/medialog", () =>
             {
@@ -530,6 +552,90 @@ internal sealed class CastBoxForm : Form
                     catch { }
                 }
                 return Results.NotFound();
+            });
+            // Personal folders: the person's own pictures and videos, listed and served separately from the movie library.
+            var imageTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp" };
+            var personalIndex = new System.Collections.Concurrent.ConcurrentDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var thumbDir = Path.Combine(_dataDir, "thumbs");
+            IEnumerable<(string Root, string File)> PersonalFiles()
+            {
+                foreach (var root in personalFolders)
+                {
+                    if (!Directory.Exists(root)) continue;
+                    IEnumerable<string> files;
+                    try { files = Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories); } catch { continue; }
+                    foreach (var file in files)
+                    {
+                        var ext = Path.GetExtension(file);
+                        if (imageTypes.Contains(ext) || supported.Contains(ext)) yield return (root, file);
+                    }
+                }
+            }
+            // The index makes serving a grid of thumbnails cheap; a miss re-reads the folders once.
+            string? FindPersonal(string id)
+            {
+                if (personalIndex.TryGetValue(id, out var known) && File.Exists(known)) return known;
+                try
+                {
+                    foreach (var (_, file) in PersonalFiles())
+                    {
+                        var fileId = MakeId(file); personalIndex[fileId] = file;
+                        if (string.Equals(fileId, id, StringComparison.OrdinalIgnoreCase)) return file;
+                    }
+                }
+                catch { }
+                return null;
+            }
+            app.MapGet("/api/personal", () =>
+            {
+                var items = new List<object>(); var lan = GetLanIp();
+                try
+                {
+                    foreach (var (root, file) in PersonalFiles())
+                    {
+                        FileInfo info;
+                        try { info = new FileInfo(file); } catch { continue; }
+                        var id = MakeId(file); personalIndex[id] = file;
+                        var ext = Path.GetExtension(file); var isImage = imageTypes.Contains(ext);
+                        var rootName = Path.GetFileName(root.TrimEnd('\\', '/')); if (rootName.Length == 0) rootName = root.TrimEnd('\\', '/');
+                        var relativeFolder = Path.GetRelativePath(root, Path.GetDirectoryName(file) ?? root).Replace('\\', '/'); if (relativeFolder == ".") relativeFolder = "";
+                        var url = $"http://{lan}:{port}/api/personal/{id}";
+                        items.Add(new { id, kind = isImage ? "image" : "video", title = Path.GetFileNameWithoutExtension(file), fileName = info.Name, extension = ext.TrimStart('.').ToLowerInvariant(), rootName, relativeFolder, sizeBytes = info.Length, modifiedUtc = info.LastWriteTimeUtc, url, thumbUrl = isImage ? url + "/thumb" : null });
+                    }
+                }
+                catch { }
+                return Results.Ok(items);
+            });
+            app.MapGet("/api/personal/{id}", (string id) =>
+            {
+                var file = FindPersonal(id);
+                if (file is null) return Results.NotFound();
+                try
+                {
+                    var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 131072, FileOptions.Asynchronous | FileOptions.SequentialScan);
+                    if (!types.TryGetContentType(file, out var mime)) mime = "application/octet-stream";
+                    if (Path.GetExtension(file).Equals(".mkv", StringComparison.OrdinalIgnoreCase)) mime = "video/x-matroska";
+                    return Results.File(stream, mime, enableRangeProcessing: true);
+                }
+                catch { return Results.NotFound(); }
+            });
+            app.MapGet("/api/personal/{id}/thumb", (string id, int? w, HttpContext ctx) =>
+            {
+                var file = FindPersonal(id);
+                if (file is null || !imageTypes.Contains(Path.GetExtension(file))) return Results.NotFound();
+                var side = Math.Clamp(w ?? 480, 120, 1280);
+                try
+                {
+                    var cached = Path.Combine(thumbDir, $"{id}-{side}-{File.GetLastWriteTimeUtc(file).Ticks}.jpg");
+                    if (!File.Exists(cached)) Thumbnails.Create(file, cached, side);
+                    ctx.Response.Headers.CacheControl = "private, max-age=86400";
+                    return Results.File(new FileStream(cached, FileMode.Open, FileAccess.Read, FileShare.Read), "image/jpeg");
+                }
+                catch
+                {
+                    // A picture System.Drawing can't read (some WebP files, say): the TV can still show the original.
+                    return Results.Redirect($"/api/personal/{id}");
+                }
             });
             // The TV reports that it finished a file; MediaLog gets it in the background (MediaLog/WatchSyncService.cs).
             app.MapPost("/api/watched", async (HttpContext ctx) =>
@@ -748,5 +854,5 @@ internal sealed class CastBoxForm : Form
         f.Controls.Add(copy); f.Show(this);
     }
     protected override void OnFormClosed(FormClosedEventArgs e) { base.OnFormClosed(e); _log.Dispose(); }
-    private sealed class AppSettings { public int Port { get; set; } = 5078; public string? ServerId { get; set; } public List<string> MediaFolders { get; set; } = new(); }
+    private sealed class AppSettings { public int Port { get; set; } = 5078; public string? ServerId { get; set; } public List<string> MediaFolders { get; set; } = new(); public List<string> PersonalFolders { get; set; } = new(); }
 }
