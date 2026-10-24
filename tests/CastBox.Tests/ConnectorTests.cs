@@ -63,6 +63,45 @@ public sealed class ConnectorTests : IDisposable
     }
 
     [Fact]
+    public async Task Approval_remembers_which_account_the_connection_belongs_to()
+    {
+        await ConnectNow();
+        var snapshot = _service.Snapshot();
+        Assert.Equal("ana", snapshot.Username);
+        Assert.Equal("acc-ana", snapshot.AccountId);
+    }
+
+    [Fact]
+    public async Task Refreshing_picks_up_a_username_chosen_later_and_disconnecting_forgets_the_account()
+    {
+        _mediaLog.Username = null;
+        await ConnectNow();
+        Assert.Null(_service.Snapshot().Username);
+
+        _mediaLog.Username = "ana_r";
+        var before = _changed;
+        await _service.RefreshAccountAsync(CancellationToken.None);
+        Assert.Equal("ana_r", _service.Snapshot().Username);
+        Assert.True(_changed > before);
+
+        await _service.RefreshAccountAsync(CancellationToken.None); // nothing new: no change notification
+        Assert.Equal(before + 1, _changed);
+
+        await _connector.DisconnectAsync(CancellationToken.None);
+        Assert.Null(_service.Snapshot().AccountId);
+    }
+
+    [Fact]
+    public async Task A_failed_refresh_keeps_what_was_known_and_an_unconnected_one_does_nothing()
+    {
+        await _service.RefreshAccountAsync(CancellationToken.None); // not connected: no call, no error
+        await ConnectNow();
+        _mediaLog.WhoAmIFails = true;
+        await _service.RefreshAccountAsync(CancellationToken.None);
+        Assert.Equal("ana", _service.Snapshot().Username);
+    }
+
+    [Fact]
     public async Task A_missing_label_does_not_undo_a_successful_connection()
     {
         _mediaLog.WhoAmIFails = true;
