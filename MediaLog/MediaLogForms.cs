@@ -54,6 +54,7 @@ internal sealed class MediaLogConnectDialog : Form
     private readonly RoundedButton _close;
     private readonly CancellationTokenSource _cts = new();
     private string? _connectUrl;
+    private const string DefaultAddress = "https://thinglog.netlify.app";
 
     public MediaLogConnectDialog(MediaLogConnector connector, string? savedAddress)
     {
@@ -61,11 +62,11 @@ internal sealed class MediaLogConnectDialog : Form
         MediaLogUi.Style(this, "Connect to MediaLog", new Size(560, 372));
 
         var title = MediaLogUi.Label("MediaLog address", bold: true); title.SetBounds(24, 20, 500, 24);
-        _address = MediaLogUi.Box(savedAddress ?? ""); _address.SetBounds(24, 48, 512, 28);
-        var hint = MediaLogUi.Label("The address of your MediaLog site. CastBox opens it so you can approve this PC.", muted: true); hint.SetBounds(24, 82, 512, 22);
+        _address = MediaLogUi.Box(string.IsNullOrWhiteSpace(savedAddress) ? DefaultAddress : savedAddress); _address.SetBounds(24, 48, 512, 28);
+        var hint = MediaLogUi.Label("Check the address, then press Connect. CastBox shows a code and opens MediaLog so you can approve this PC.", muted: true); hint.SetBounds(24, 82, 512, 40);
 
-        _code.SetBounds(24, 120, 512, 56);
-        _status.SetBounds(24, 184, 512, 92);
+        _code.SetBounds(24, 126, 512, 56);
+        _status.SetBounds(24, 188, 512, 92);
 
         _connect = MediaLogUi.Button("Connect", true, async (_, _) => await ConnectAsync()); _connect.SetBounds(24, 304, 130, 42);
         _openAgain = MediaLogUi.Button("Open page", false, (_, _) => OpenPage()); _openAgain.SetBounds(160, 304, 130, 42); _openAgain.Visible = false;
@@ -73,6 +74,8 @@ internal sealed class MediaLogConnectDialog : Form
         _close = MediaLogUi.Button("Cancel", false, (_, _) => Close()); _close.SetBounds(406, 304, 130, 42);
         Controls.AddRange(new Control[] { title, _address, hint, _code, _status, _connect, _openAgain, _copy, _close });
         AcceptButton = _connect;
+        // The address is already filled in, so the next step is the button; Enter works too.
+        Shown += (_, _) => { if (_address.Text.Length > 0) ActiveControl = _connect; };
         FormClosing += (_, _) => _cts.Cancel();
     }
 
