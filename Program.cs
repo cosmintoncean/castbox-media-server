@@ -553,62 +553,89 @@ internal sealed class CastBoxForm : Form
                 }
                 return Results.NotFound();
             });
-            // Personal folders: the person's own pictures and videos, listed and served separately from the movie library.
+            // Personal folders: the person's own pictures and videos, served separately from the movie library. A library can
+            // hold hundreds of thousands of pictures, so the TV browses one folder at a time from an index kept here.
             var imageTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp" };
-            var personalIndex = new System.Collections.Concurrent.ConcurrentDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             var thumbDir = Path.Combine(_dataDir, "thumbs");
-            IEnumerable<(string Root, string File)> PersonalFiles()
+            var indexLock = new object();
+            Task<PersonalIndex>? indexTask = null;
+            DateTime indexStartedUtc = DateTime.MinValue;
+            Task<PersonalIndex> StartIndexBuild()
             {
-                foreach (var root in personalFolders)
+                indexStartedUtc = DateTime.UtcNow;
+                return Task.Run(() =>
                 {
-                    if (!Directory.Exists(root)) continue;
-                    IEnumerable<string> files;
-                    try { files = Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories); } catch { continue; }
-                    foreach (var file in files)
+                    var built = PersonalIndex.Build(personalFolders, MakeId, imageTypes, supported);
+                    LogAny($"Personal folders indexed: {built.Pictures:N0} pictures, {built.Videos:N0} videos.");
+                    return built;
+                });
+            }
+            // The first request waits for the index; later ones reuse it and refresh it in the background every few minutes.
+            Task<PersonalIndex> GetIndex(bool allowRefresh)
+            {
+                lock (indexLock)
+                {
+                    if (indexTask is null) indexTask = StartIndexBuild();
+                    else if (allowRefresh && indexTask.IsCompleted && DateTime.UtcNow - indexStartedUtc > TimeSpan.FromMinutes(3))
                     {
-                        var ext = Path.GetExtension(file);
-                        if (imageTypes.Contains(ext) || supported.Contains(ext)) yield return (root, file);
+                        var old = indexTask;
+                        var fresh = StartIndexBuild();
+                        indexTask = fresh.ContinueWith(t => t.IsFaulted ? old.Result : t.Result);
                     }
+                    return indexTask;
                 }
             }
-            // The index makes serving a grid of thumbnails cheap; a miss re-reads the folders once.
-            string? FindPersonal(string id)
+            if (personalFolders.Count > 0) GetIndex(false); // start reading the folders now rather than at the first request
+            // Looking up the network address takes ~0.2 s, too slow to do for every page of thumbnails.
+            var lanCache = ("", DateTime.MinValue);
+            string Lan()
             {
-                if (personalIndex.TryGetValue(id, out var known) && File.Exists(known)) return known;
-                try
-                {
-                    foreach (var (_, file) in PersonalFiles())
-                    {
-                        var fileId = MakeId(file); personalIndex[fileId] = file;
-                        if (string.Equals(fileId, id, StringComparison.OrdinalIgnoreCase)) return file;
-                    }
-                }
-                catch { }
-                return null;
+                var cached = lanCache;
+                if (cached.Item1.Length > 0 && DateTime.UtcNow - cached.Item2 < TimeSpan.FromSeconds(30)) return cached.Item1;
+                var fresh = GetLanIp(); lanCache = (fresh, DateTime.UtcNow); return fresh;
             }
-            app.MapGet("/api/personal", () =>
+            object FileJson(PersonalFile f, string lan)
             {
-                var items = new List<object>(); var lan = GetLanIp();
-                try
+                var url = $"http://{lan}:{port}/api/personal/{f.Id}";
+                return new { id = f.Id, kind = f.IsImage ? "image" : "video", title = f.Title, fileName = f.Name, extension = f.Extension, sizeBytes = f.Size, modifiedUtc = f.ModifiedUtc, url, thumbUrl = f.IsImage ? url + "/thumb" : null };
+            }
+            string? CoverUrl(PersonalDir d, string lan) => d.Cover is { } c ? $"http://{lan}:{port}/api/personal/{c.Id}/thumb" : null;
+            // The folders shared and how much is in them, enough for the TV's home screen and top level.
+            app.MapGet("/api/personal/roots", async () =>
+            {
+                var index = await GetIndex(true);
+                var lan = Lan();
+                return Results.Ok(new
                 {
-                    foreach (var (root, file) in PersonalFiles())
-                    {
-                        FileInfo info;
-                        try { info = new FileInfo(file); } catch { continue; }
-                        var id = MakeId(file); personalIndex[id] = file;
-                        var ext = Path.GetExtension(file); var isImage = imageTypes.Contains(ext);
-                        var rootName = Path.GetFileName(root.TrimEnd('\\', '/')); if (rootName.Length == 0) rootName = root.TrimEnd('\\', '/');
-                        var relativeFolder = Path.GetRelativePath(root, Path.GetDirectoryName(file) ?? root).Replace('\\', '/'); if (relativeFolder == ".") relativeFolder = "";
-                        var url = $"http://{lan}:{port}/api/personal/{id}";
-                        items.Add(new { id, kind = isImage ? "image" : "video", title = Path.GetFileNameWithoutExtension(file), fileName = info.Name, extension = ext.TrimStart('.').ToLowerInvariant(), rootName, relativeFolder, sizeBytes = info.Length, modifiedUtc = info.LastWriteTimeUtc, url, thumbUrl = isImage ? url + "/thumb" : null });
-                    }
-                }
-                catch { }
-                return Results.Ok(items);
+                    pictures = index.Pictures, videos = index.Videos,
+                    roots = index.Roots.Select((r, i) => new { index = i, name = r.Name, items = r.TotalItems, coverUrl = CoverUrl(r, lan) }).ToList()
+                });
             });
-            app.MapGet("/api/personal/{id}", (string id) =>
+            // One folder: its sub-folders, and a page of the pictures and videos directly inside it.
+            app.MapGet("/api/personal/browse", async (int? root, string? path, int? offset, int? limit) =>
             {
-                var file = FindPersonal(id);
+                var index = await GetIndex(false);
+                var dir = index.Resolve(root ?? 0, path ?? "");
+                if (dir is null) return Results.NotFound(new { error = "unknown_folder" });
+                var lan = Lan();
+                var from = Math.Max(0, offset ?? 0); var take = Math.Clamp(limit ?? 120, 1, 500);
+                var page = dir.Files.Skip(from).Take(take).Select(f => FileJson(f, lan)).ToList();
+                return Results.Ok(new
+                {
+                    name = dir.Name, items = dir.TotalItems, totalFiles = dir.Files.Count, offset = from, hasMore = from + page.Count < dir.Files.Count,
+                    folders = from == 0 ? dir.Dirs.Select(d => new { name = d.Name, items = d.TotalItems, coverUrl = CoverUrl(d, lan) }).Cast<object>().ToList() : new List<object>(),
+                    files = page
+                });
+            });
+            async Task<string?> FindPersonalAsync(string id)
+            {
+                if (personalFolders.Count == 0) return null;
+                var file = (await GetIndex(false)).Find(id);
+                return file is not null && File.Exists(file.FullPath) ? file.FullPath : null;
+            }
+            app.MapGet("/api/personal/{id}", async (string id) =>
+            {
+                var file = await FindPersonalAsync(id);
                 if (file is null) return Results.NotFound();
                 try
                 {
@@ -619,15 +646,15 @@ internal sealed class CastBoxForm : Form
                 }
                 catch { return Results.NotFound(); }
             });
-            app.MapGet("/api/personal/{id}/thumb", (string id, int? w, HttpContext ctx) =>
+            app.MapGet("/api/personal/{id}/thumb", async (string id, int? w, HttpContext ctx) =>
             {
-                var file = FindPersonal(id);
+                var file = await FindPersonalAsync(id);
                 if (file is null || !imageTypes.Contains(Path.GetExtension(file))) return Results.NotFound();
                 var side = Math.Clamp(w ?? 480, 120, 1280);
                 try
                 {
                     var cached = Path.Combine(thumbDir, $"{id}-{side}-{File.GetLastWriteTimeUtc(file).Ticks}.jpg");
-                    if (!File.Exists(cached)) Thumbnails.Create(file, cached, side);
+                    if (!File.Exists(cached)) await Task.Run(() => Thumbnails.Create(file, cached, side));
                     ctx.Response.Headers.CacheControl = "private, max-age=86400";
                     return Results.File(new FileStream(cached, FileMode.Open, FileAccess.Read, FileShare.Read), "image/jpeg");
                 }
