@@ -50,6 +50,7 @@ internal sealed class MediaLogConnectDialog : Form
     private readonly Label _code = new() { AutoSize = false, TextAlign = ContentAlignment.MiddleCenter, Font = new Font("Consolas", 30, FontStyle.Bold), ForeColor = MediaLogUi.Amber, Visible = false, BackColor = Color.Transparent };
     private readonly RoundedButton _connect;
     private readonly RoundedButton _openAgain;
+    private readonly RoundedButton _copy;
     private readonly RoundedButton _close;
     private readonly CancellationTokenSource _cts = new();
     private string? _connectUrl;
@@ -57,24 +58,32 @@ internal sealed class MediaLogConnectDialog : Form
     public MediaLogConnectDialog(MediaLogConnector connector, string? savedAddress)
     {
         _connector = connector;
-        MediaLogUi.Style(this, "Connect to MediaLog", new Size(560, 330));
+        MediaLogUi.Style(this, "Connect to MediaLog", new Size(560, 372));
 
         var title = MediaLogUi.Label("MediaLog address", bold: true); title.SetBounds(24, 20, 500, 24);
         _address = MediaLogUi.Box(savedAddress ?? ""); _address.SetBounds(24, 48, 512, 28);
         var hint = MediaLogUi.Label("The address of your MediaLog site. CastBox opens it so you can approve this PC.", muted: true); hint.SetBounds(24, 82, 512, 22);
 
         _code.SetBounds(24, 120, 512, 56);
-        _status.SetBounds(24, 184, 512, 50);
+        _status.SetBounds(24, 184, 512, 92);
 
-        _connect = MediaLogUi.Button("Connect", true, async (_, _) => await ConnectAsync()); _connect.SetBounds(24, 262, 130, 42);
-        _openAgain = MediaLogUi.Button("Open the page again", false, (_, _) => OpenPage()); _openAgain.SetBounds(166, 262, 190, 42); _openAgain.Visible = false;
-        _close = MediaLogUi.Button("Cancel", false, (_, _) => Close()); _close.SetBounds(406, 262, 130, 42);
-        Controls.AddRange(new Control[] { title, _address, hint, _code, _status, _connect, _openAgain, _close });
+        _connect = MediaLogUi.Button("Connect", true, async (_, _) => await ConnectAsync()); _connect.SetBounds(24, 304, 130, 42);
+        _openAgain = MediaLogUi.Button("Open page", false, (_, _) => OpenPage()); _openAgain.SetBounds(160, 304, 130, 42); _openAgain.Visible = false;
+        _copy = MediaLogUi.Button("Copy link", false, (_, _) => CopyLink()); _copy.SetBounds(298, 304, 100, 42); _copy.Visible = false;
+        _close = MediaLogUi.Button("Cancel", false, (_, _) => Close()); _close.SetBounds(406, 304, 130, 42);
+        Controls.AddRange(new Control[] { title, _address, hint, _code, _status, _connect, _openAgain, _copy, _close });
         AcceptButton = _connect;
         FormClosing += (_, _) => _cts.Cancel();
     }
 
     private void SetStatus(string text, bool error = false) { _status.Text = text; _status.ForeColor = error ? MediaLogUi.Error : MediaLogUi.Muted; }
+
+    private void CopyLink()
+    {
+        if (_connectUrl is null) return;
+        try { Clipboard.SetText(_connectUrl); SetStatus("Link copied. Paste it into your browser's address bar."); }
+        catch (Exception) { SetStatus("Couldn't copy it. The link is " + _connectUrl); }
+    }
 
     private void OpenPage()
     {
@@ -85,20 +94,20 @@ internal sealed class MediaLogConnectDialog : Form
 
     private async Task ConnectAsync()
     {
-        _connect.Enabled = false; _address.Enabled = false; _code.Visible = false; _openAgain.Visible = false;
+        _connect.Enabled = false; _address.Enabled = false; _code.Visible = false; _openAgain.Visible = false; _copy.Visible = false;
         SetStatus("Checking the address…");
         try
         {
             var (discovery, pairing, url) = await _connector.BeginAsync(_address.Text, "CastBox on " + Environment.MachineName, _cts.Token);
             _connectUrl = url;
-            _code.Text = pairing.UserCode; _code.Visible = true; _openAgain.Visible = true;
-            SetStatus("Approve “CastBox on " + Environment.MachineName + "” on the MediaLog page that just opened. Code: " + pairing.UserCode);
+            _code.Text = pairing.UserCode; _code.Visible = true; _openAgain.Visible = true; _copy.Visible = true;
+            SetStatus("Approve “CastBox on " + Environment.MachineName + "” on the MediaLog page that just opened.\nPage didn't open? Go to " + url.Substring(0, url.LastIndexOf('/')) + " and type the code above, or use Copy link.");
             OpenPage();
 
             switch (await _connector.WaitAsync(discovery, pairing, _cts.Token))
             {
                 case PairStatus.Approved:
-                    _code.Visible = false; _openAgain.Visible = false;
+                    _code.Visible = false; _openAgain.Visible = false; _copy.Visible = false;
                     SetStatus("Connected. CastBox will now mark episodes and movies you finish on the TV as watched in MediaLog.");
                     _close.Text = "Done";
                     return;
@@ -114,7 +123,7 @@ internal sealed class MediaLogConnectDialog : Form
         catch (MediaLogException ex) { SetStatus(ex.Message, error: true); }
         catch (Exception ex) { SetStatus("Something went wrong: " + ex.Message, error: true); }
 
-        _code.Visible = false; _openAgain.Visible = false;
+        _code.Visible = false; _openAgain.Visible = false; _copy.Visible = false;
         _connect.Enabled = true; _address.Enabled = true;
     }
 }
