@@ -1,5 +1,5 @@
 #define MyAppName "CastBox Server"
-#define MyAppVersion "0.3.0"
+#define MyAppVersion "0.3.1"
 #define MyAppPublisher "CastBox"
 #define MyAppExeName "CastBox.exe"
 
