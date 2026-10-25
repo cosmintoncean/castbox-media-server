@@ -686,73 +686,9 @@ internal sealed class CastBoxForm : Form
             _ffmpegFound = ffmpegPath is not null;
             var streamer = ffmpegPath is null ? null : new ScreenStreamer(ffmpegPath, LogAny);
             if (streamer is null) LogAny("Screen sharing is off: FFmpeg was not found (see the ffmpeg folder next to CastBox.exe).");
-            var streamSlots = new SemaphoreSlim(3);
-            string StreamUrl(int screen, string token) => $"http://{Lan()}:{port}/api/screens/stream?screen={screen}&token={token}";
-            object RequestJson(ShareRequest r) => new { requestId = r.Id, status = r.Status.ToString().ToLowerInvariant(), streamUrl = r.Status == ShareStatus.Approved && r.Token is not null ? StreamUrl(r.Screen, r.Token) : null };
-            app.MapGet("/api/screens", (string? tvId, string? tvName) =>
+            ScreenEndpoints.Map(app, _screenShare, streamer, Lan, port, LogAny, (session, name) =>
             {
-                if (!string.IsNullOrWhiteSpace(tvId)) _screenShare.Touch(tvId, tvName ?? "TV");
-                return Results.Ok(new
-                {
-                    available = streamer is not null, sound = true, pcName = Environment.MachineName,
-                    screens = _screenShare.Screens.Select(s => new { index = s.Index, name = s.Name, width = s.Width, height = s.Height, primary = s.Primary }).ToList()
-                });
-            });
-            app.MapPost("/api/screens/request", async (HttpContext ctx) =>
-            {
-                if (streamer is null) return Results.Json(new { error = "ffmpeg_missing" }, statusCode: StatusCodes.Status503ServiceUnavailable);
-                JsonNode? body;
-                try
-                {
-                    using var reader = new StreamReader(ctx.Request.Body, Encoding.UTF8);
-                    var text = await reader.ReadToEndAsync();
-                    if (text.Length > 2048) return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
-                    body = JsonNode.Parse(text);
-                }
-                catch (JsonException) { return Results.BadRequest(new { error = "invalid_json" }); }
-                if (body is not JsonObject o) return Results.BadRequest(new { error = "invalid_json" });
-                var tvId = (string?)o["tvId"]; var tvName = (string?)o["tvName"]; int? screen = (int?)o["screen"];
-                if (string.IsNullOrWhiteSpace(tvId) || tvId.Length > 100 || screen is null) return Results.BadRequest(new { error = "invalid_request" });
-                var request = _screenShare.Request(tvId, tvName ?? "TV", screen.Value);
-                return request is null ? Results.NotFound(new { error = "unknown_screen" }) : Results.Json(RequestJson(request), statusCode: StatusCodes.Status202Accepted);
-            });
-            app.MapGet("/api/screens/request/{id}", (string id) => _screenShare.Poll(id) is { } r ? Results.Ok(RequestJson(r)) : Results.NotFound(new { error = "unknown_request" }));
-            // A TV with the app open asks here for a screen the PC wants to send it ("Share screen" in the server window).
-            app.MapGet("/api/screens/inbox", async (string tvId, string? tvName, int? wait, HttpContext ctx) =>
-            {
-                var until = DateTime.UtcNow.AddSeconds(Math.Clamp(wait ?? 0, 0, 30));
-                var lastTouch = DateTime.MinValue;
-                try
-                {
-                    do
-                    {
-                        if (DateTime.UtcNow - lastTouch > TimeSpan.FromSeconds(5)) { _screenShare.Touch(tvId, tvName ?? "TV"); lastTouch = DateTime.UtcNow; }
-                        if (_screenShare.TakePush(tvId) is { } offer)
-                            return Results.Ok(new { screen = offer.Screen, name = _screenShare.GetScreen(offer.Screen)?.Name, pcName = Environment.MachineName, streamUrl = StreamUrl(offer.Screen, offer.Token) });
-                        await Task.Delay(300, ctx.RequestAborted);
-                    } while (DateTime.UtcNow < until);
-                }
-                catch (OperationCanceledException) { }
-                return Results.NoContent();
-            });
-            app.MapGet("/api/screens/stream", async (HttpContext ctx, int screen, string? token) =>
-            {
-                if (streamer is null) { ctx.Response.StatusCode = StatusCodes.Status503ServiceUnavailable; return; }
-                var session = _screenShare.Open(token, screen);
-                if (session is null) { ctx.Response.StatusCode = StatusCodes.Status403Forbidden; return; }
-                if (!streamSlots.Wait(0)) { _screenShare.Close(session); ctx.Response.StatusCode = StatusCodes.Status429TooManyRequests; return; }
-                try
-                {
-                    ctx.Response.ContentType = "video/mp2t";
-                    ctx.Response.Headers.CacheControl = "no-store";
-                    ctx.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpResponseBodyFeature>()?.DisableBuffering();
-                    var name = _screenShare.GetScreen(screen)?.Name ?? "a screen";
-                    LogAny($"{session.TvName} is watching {name}.");
-                    try { BeginInvoke(new Action(() => _tray.ShowBalloonTip(2500, "CastBox screen sharing", $"{session.TvName} is watching {name}.", ToolTipIcon.Info))); } catch (ObjectDisposedException) { }
-                    using var linked = CancellationTokenSource.CreateLinkedTokenSource(ctx.RequestAborted, session.Ended);
-                    await streamer.StreamAsync(screen, true, ctx.Response.Body, linked.Token);
-                }
-                finally { streamSlots.Release(); _screenShare.Close(session); LogAny($"{session.TvName} stopped watching."); }
+                try { BeginInvoke(new Action(() => _tray.ShowBalloonTip(2500, "CastBox screen sharing", $"{session.TvName} is watching {name}.", ToolTipIcon.Info))); } catch (ObjectDisposedException) { }
             });
             // The TV reports that it finished a file; MediaLog gets it in the background (MediaLog/WatchSyncService.cs).
             app.MapPost("/api/watched", async (HttpContext ctx) =>

@@ -136,7 +136,7 @@ public sealed class LoopbackAudio : IDisposable
 }
 
 /// <summary>Runs FFmpeg for one viewer: capture a screen, encode it, and copy the result to the TV's HTTP response.</summary>
-public sealed class ScreenStreamer
+public sealed class ScreenStreamer : IScreenStreamer
 {
     private readonly string _ffmpeg;
     private readonly Action<string> _log;
