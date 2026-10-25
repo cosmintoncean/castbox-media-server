@@ -20,4 +20,7 @@
     <EmbeddedResource Include="castbox-logo.png" LogicalName="CastBox.castbox-logo.png" />
     <EmbeddedResource Include="CastBox.ico" LogicalName="CastBox.CastBox.ico" />
   </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="NAudio.Wasapi" Version="2.2.1" />
+  </ItemGroup>
 </Project>

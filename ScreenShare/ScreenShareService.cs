@@ -72,6 +72,12 @@ public sealed class ScreenShareService
         _clock = clock ?? TimeProvider.System;
     }
 
+    /// <summary>Replaces the list of TVs allowed for good (when the settings are read at start). Not saved again.</summary>
+    public void LoadAllowed(IReadOnlyDictionary<string, string>? allowed)
+    {
+        lock (_lock) { _allowed.Clear(); if (allowed is not null) foreach (var kv in allowed) _allowed[kv.Key] = kv.Value; }
+    }
+
     /// <summary>Raised (on any thread) when a TV is waiting for a yes or no.</summary>
     public event Action<ShareRequest>? ApprovalNeeded;
     /// <summary>Raised when requests, sessions or the known TVs changed, so the window can refresh.</summary>

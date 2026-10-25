@@ -10,6 +10,7 @@ using System.Globalization;
 using System.Text.Json.Nodes;
 using CastBox.MediaLog;
 using CastBox.Personal;
+using CastBox.ScreenShare;
 using Microsoft.AspNetCore.StaticFiles;
 
 namespace CastBox;
@@ -175,7 +176,9 @@ internal sealed class BrandHeader : Control
 
 internal sealed class CastBoxForm : Form
 {
-    private readonly string _dataDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CastBox");
+    // CASTBOX_DATA_DIR lets a test copy of CastBox keep its settings, MediaLog connection and thumbnails apart from the real ones.
+    private readonly string _dataDir = Environment.GetEnvironmentVariable("CASTBOX_DATA_DIR") is { Length: > 0 } custom
+        ? custom : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CastBox");
     private readonly string _configPath;
     private readonly ListBox _folders = new() { Dock = DockStyle.Fill, IntegralHeight = false };
     // Pictures and videos that are shown on their own on the TV (no poster lookup, no MediaLog).
@@ -201,6 +204,10 @@ internal sealed class CastBoxForm : Form
     private readonly MediaLogConnector _mediaLogConnector;
     private readonly CancellationTokenSource _syncCts = new();
     private ToolStripMenuItem? _mediaLogMenu, _mlStatus, _mlConnect, _mlConfirm, _mlForget, _mlDisconnect;
+    // Screen sharing: a TV may watch one of this PC's screens only after the person here said yes (ScreenShare/).
+    private readonly ScreenShareService _screenShare;
+    private RoundedButton? _shareButton;
+    private bool _ffmpegFound;
 
     public CastBoxForm(bool launchInBackground)
     {
@@ -220,6 +227,9 @@ internal sealed class CastBoxForm : Form
         StartPosition = FormStartPosition.CenterScreen;
         BackColor = Color.FromArgb(25, 27, 32); ForeColor = Color.FromArgb(245, 241, 230);
         Font = new Font("Segoe UI", 10);
+        _screenShare = new ScreenShareService(ScreenLister.List, null, _ => SaveSettings(quiet: true));
+        _screenShare.Changed += () => { if (IsHandleCreated && !IsDisposed) { try { BeginInvoke(new Action(UpdateShareButton)); } catch (ObjectDisposedException) { } } };
+        _screenShare.ApprovalNeeded += request => { if (IsHandleCreated && !IsDisposed) { try { BeginInvoke(new Action(() => AskShareApproval(request))); } catch (ObjectDisposedException) { } } };
         BuildLayout(); LoadSettings(); ApplyTheme();
         var trayMenu = new ContextMenuStrip();
         trayMenu.Items.Add("Open CastBox", null, (_, _) => { Show(); WindowState = FormWindowState.Normal; Activate(); });
@@ -227,7 +237,7 @@ internal sealed class CastBoxForm : Form
         trayMenu.Items.Add("Exit", null, async (_, _) => { _tray.Visible = false; await StopServerAsync(); Close(); });
         _tray.Text = "CastBox Server"; _tray.Icon = Icon; _tray.ContextMenuStrip = trayMenu;
         _tray.DoubleClick += (_, _) => { Show(); WindowState = FormWindowState.Normal; Activate(); };
-        FormClosing += async (_, e) => { if (e.CloseReason == CloseReason.UserClosing && _server is not null) { e.Cancel = true; Hide(); _tray.Visible = true; _tray.ShowBalloonTip(1500, "CastBox is running", "The media server continues in the background.", ToolTipIcon.Info); } else { _syncCts.Cancel(); _tray.Visible = false; await StopServerAsync(); } };
+        FormClosing += async (_, e) => { if (e.CloseReason == CloseReason.UserClosing && _server is not null) { e.Cancel = true; Hide(); _tray.Visible = true; _tray.ShowBalloonTip(1500, "CastBox is running", "The media server continues in the background.", ToolTipIcon.Info); } else { _syncCts.Cancel(); _screenShare.StopAll(); _tray.Visible = false; await StopServerAsync(); } };
         Shown += async (_, _) => { _ = Task.Run(() => _mediaLogService.RunAsync(_syncCts.Token)); UpdateMediaLogMenu(); if (_startWithWindows.Checked || _launchInBackground) await StartServerAsync(); if (_launchInBackground && _server is not null) { Hide(); _tray.Visible = true; } };
     }
 
@@ -296,16 +306,19 @@ internal sealed class CastBoxForm : Form
         _startWithWindows.Dock = DockStyle.Fill; _startWithWindows.Margin = new Padding(0, 0, 0, 0); setup.Controls.Add(_startWithWindows, 3, 0);
         root.Controls.Add(setup, 0, 2);
 
-        var serverPanel = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1, BackColor = BackColor, Margin = new Padding(0) };
+        var serverPanel = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 4, RowCount = 1, BackColor = BackColor, Margin = new Padding(0) };
         serverPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         serverPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 220));
         serverPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 250));
+        serverPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 200));
         serverPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         StyleButton(_startStop, true); _startStop.Dock = DockStyle.Fill; _startStop.Margin = new Padding(0, 8, 14, 8);
         _startStop.Click += async (_, _) => { if (_server is null) await StartServerAsync(); else await StopServerAsync(); };
         StyleButton(_firewall, false); _firewall.Dock = DockStyle.Fill; _firewall.Margin = new Padding(0, 8, 14, 8); _firewall.Click += (_, _) => ConfigureFirewall();
         _status.Dock = DockStyle.Fill; _status.TextAlign = ContentAlignment.MiddleLeft; _status.Margin = new Padding(2, 0, 0, 0); _status.Font = new Font("Segoe UI Semibold", 12);
-        serverPanel.Controls.Add(_startStop, 0, 0); serverPanel.Controls.Add(_firewall, 1, 0); serverPanel.Controls.Add(_status, 2, 0);
+        _shareButton = MakeButton("Share screen"); StyleButton(_shareButton, false); _shareButton.Glyph = "\uE7F4"; _shareButton.Dock = DockStyle.Fill; _shareButton.Margin = new Padding(0, 8, 14, 8);
+        _shareButton.Click += (_, _) => OpenShareDialog();
+        serverPanel.Controls.Add(_startStop, 0, 0); serverPanel.Controls.Add(_firewall, 1, 0); serverPanel.Controls.Add(_shareButton, 2, 0); serverPanel.Controls.Add(_status, 3, 0);
         root.Controls.Add(serverPanel, 0, 3);
 
         var bottom = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, BackColor = BackColor, Margin = new Padding(0, 4, 0, 0) };
@@ -448,8 +461,11 @@ internal sealed class CastBoxForm : Form
                 var cfg = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(_configPath)) ?? new AppSettings();
                 _serverId = cfg.ServerId ?? "";
                 _port.Value = Math.Clamp(cfg.Port, (int)_port.Minimum, (int)_port.Maximum);
-                foreach (var f in cfg.MediaFolders.Where(Directory.Exists)) _folders.Items.Add(f);
-                foreach (var f in cfg.PersonalFolders.Where(Directory.Exists)) _personal.Items.Add(f);
+                // Keep folders that aren't there right now (a drive that isn't ready yet at sign-in, a network share): they are
+                // skipped while missing but must not be forgotten, or the next save would erase them from the settings.
+                foreach (var f in cfg.MediaFolders) { _folders.Items.Add(f); if (!Directory.Exists(f)) Log("Folder not available yet: " + f); }
+                foreach (var f in cfg.PersonalFolders) { _personal.Items.Add(f); if (!Directory.Exists(f)) Log("Personal folder not available yet: " + f); }
+                _screenShare.LoadAllowed(cfg.AllowedTvs);
                 _startWithWindows.Checked = IsStartupEnabled();
             }
             else _startWithWindows.Checked = IsStartupEnabled();
@@ -459,13 +475,14 @@ internal sealed class CastBoxForm : Form
         // A permanent ID lets the TV app find this PC again after its network address changes.
         if (string.IsNullOrEmpty(_serverId)) { _serverId = Guid.NewGuid().ToString("N"); SaveSettings(); }
     }
-    private void SaveSettings()
+    private void SaveSettings(bool quiet = false)
     {
         if (_loading) return;
         try
         {
-            var cfg = new AppSettings { Port = (int)_port.Value, ServerId = _serverId, MediaFolders = _folders.Items.Cast<string>().Distinct(StringComparer.OrdinalIgnoreCase).ToList(), PersonalFolders = _personal.Items.Cast<string>().Distinct(StringComparer.OrdinalIgnoreCase).ToList() };
+            var cfg = new AppSettings { Port = (int)_port.Value, ServerId = _serverId, MediaFolders = _folders.Items.Cast<string>().Distinct(StringComparer.OrdinalIgnoreCase).ToList(), PersonalFolders = _personal.Items.Cast<string>().Distinct(StringComparer.OrdinalIgnoreCase).ToList(), AllowedTvs = _screenShare.AllowedTvs.ToDictionary(a => a.Key, a => a.Value) };
             File.WriteAllText(_configPath, JsonSerializer.Serialize(cfg, new JsonSerializerOptions { WriteIndented = true }));
+            if (quiet) return;
             Log("Settings saved.");
             if (_server is not null) Log("Restart the server to apply the changed port or folder list.");
         }
@@ -664,6 +681,79 @@ internal sealed class CastBoxForm : Form
                     return Results.Redirect($"/api/personal/{id}");
                 }
             });
+            // Screen sharing: a TV watches one of this PC's screens (capture + encode with FFmpeg) once the person here allowed it.
+            var ffmpegPath = FfmpegLocator.Find(AppContext.BaseDirectory, Environment.GetEnvironmentVariable("PATH"));
+            _ffmpegFound = ffmpegPath is not null;
+            var streamer = ffmpegPath is null ? null : new ScreenStreamer(ffmpegPath, LogAny);
+            if (streamer is null) LogAny("Screen sharing is off: FFmpeg was not found (see the ffmpeg folder next to CastBox.exe).");
+            var streamSlots = new SemaphoreSlim(3);
+            string StreamUrl(int screen, string token) => $"http://{Lan()}:{port}/api/screens/stream?screen={screen}&token={token}";
+            object RequestJson(ShareRequest r) => new { requestId = r.Id, status = r.Status.ToString().ToLowerInvariant(), streamUrl = r.Status == ShareStatus.Approved && r.Token is not null ? StreamUrl(r.Screen, r.Token) : null };
+            app.MapGet("/api/screens", (string? tvId, string? tvName) =>
+            {
+                if (!string.IsNullOrWhiteSpace(tvId)) _screenShare.Touch(tvId, tvName ?? "TV");
+                return Results.Ok(new
+                {
+                    available = streamer is not null, sound = true, pcName = Environment.MachineName,
+                    screens = _screenShare.Screens.Select(s => new { index = s.Index, name = s.Name, width = s.Width, height = s.Height, primary = s.Primary }).ToList()
+                });
+            });
+            app.MapPost("/api/screens/request", async (HttpContext ctx) =>
+            {
+                if (streamer is null) return Results.Json(new { error = "ffmpeg_missing" }, statusCode: StatusCodes.Status503ServiceUnavailable);
+                JsonNode? body;
+                try
+                {
+                    using var reader = new StreamReader(ctx.Request.Body, Encoding.UTF8);
+                    var text = await reader.ReadToEndAsync();
+                    if (text.Length > 2048) return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
+                    body = JsonNode.Parse(text);
+                }
+                catch (JsonException) { return Results.BadRequest(new { error = "invalid_json" }); }
+                if (body is not JsonObject o) return Results.BadRequest(new { error = "invalid_json" });
+                var tvId = (string?)o["tvId"]; var tvName = (string?)o["tvName"]; int? screen = (int?)o["screen"];
+                if (string.IsNullOrWhiteSpace(tvId) || tvId.Length > 100 || screen is null) return Results.BadRequest(new { error = "invalid_request" });
+                var request = _screenShare.Request(tvId, tvName ?? "TV", screen.Value);
+                return request is null ? Results.NotFound(new { error = "unknown_screen" }) : Results.Json(RequestJson(request), statusCode: StatusCodes.Status202Accepted);
+            });
+            app.MapGet("/api/screens/request/{id}", (string id) => _screenShare.Poll(id) is { } r ? Results.Ok(RequestJson(r)) : Results.NotFound(new { error = "unknown_request" }));
+            // A TV with the app open asks here for a screen the PC wants to send it ("Share screen" in the server window).
+            app.MapGet("/api/screens/inbox", async (string tvId, string? tvName, int? wait, HttpContext ctx) =>
+            {
+                var until = DateTime.UtcNow.AddSeconds(Math.Clamp(wait ?? 0, 0, 30));
+                var lastTouch = DateTime.MinValue;
+                try
+                {
+                    do
+                    {
+                        if (DateTime.UtcNow - lastTouch > TimeSpan.FromSeconds(5)) { _screenShare.Touch(tvId, tvName ?? "TV"); lastTouch = DateTime.UtcNow; }
+                        if (_screenShare.TakePush(tvId) is { } offer)
+                            return Results.Ok(new { screen = offer.Screen, name = _screenShare.GetScreen(offer.Screen)?.Name, pcName = Environment.MachineName, streamUrl = StreamUrl(offer.Screen, offer.Token) });
+                        await Task.Delay(300, ctx.RequestAborted);
+                    } while (DateTime.UtcNow < until);
+                }
+                catch (OperationCanceledException) { }
+                return Results.NoContent();
+            });
+            app.MapGet("/api/screens/stream", async (HttpContext ctx, int screen, string? token) =>
+            {
+                if (streamer is null) { ctx.Response.StatusCode = StatusCodes.Status503ServiceUnavailable; return; }
+                var session = _screenShare.Open(token, screen);
+                if (session is null) { ctx.Response.StatusCode = StatusCodes.Status403Forbidden; return; }
+                if (!streamSlots.Wait(0)) { _screenShare.Close(session); ctx.Response.StatusCode = StatusCodes.Status429TooManyRequests; return; }
+                try
+                {
+                    ctx.Response.ContentType = "video/mp2t";
+                    ctx.Response.Headers.CacheControl = "no-store";
+                    ctx.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpResponseBodyFeature>()?.DisableBuffering();
+                    var name = _screenShare.GetScreen(screen)?.Name ?? "a screen";
+                    LogAny($"{session.TvName} is watching {name}.");
+                    try { BeginInvoke(new Action(() => _tray.ShowBalloonTip(2500, "CastBox screen sharing", $"{session.TvName} is watching {name}.", ToolTipIcon.Info))); } catch (ObjectDisposedException) { }
+                    using var linked = CancellationTokenSource.CreateLinkedTokenSource(ctx.RequestAborted, session.Ended);
+                    await streamer.StreamAsync(screen, true, ctx.Response.Body, linked.Token);
+                }
+                finally { streamSlots.Release(); _screenShare.Close(session); LogAny($"{session.TvName} stopped watching."); }
+            });
             // The TV reports that it finished a file; MediaLog gets it in the background (MediaLog/WatchSyncService.cs).
             app.MapPost("/api/watched", async (HttpContext ctx) =>
             {
@@ -705,6 +795,7 @@ internal sealed class CastBoxForm : Form
     private async Task StopServerAsync()
     {
         if (_server is null) return;
+        _screenShare.StopAll();
         try { await _server.StopAsync(); await _server.DisposeAsync(); } catch { }
         _server = null; _status.Text = "Server stopped"; _status.ForeColor = ForeColor; _startStop.Text = "Start server"; _startStop.Glyph = "\uE768"; StyleButton(_startStop, true); _address.Text = "Not running"; Log("Server stopped.");
     }
@@ -849,6 +940,31 @@ internal sealed class CastBoxForm : Form
         menu.Items.Add(_mediaLogMenu);
     }
 
+    /// <summary>Shows the question when a TV asks to watch a screen. The TV waits for the answer.</summary>
+    private void AskShareApproval(ShareRequest request)
+    {
+        if (_screenShare.Poll(request.Id)?.Status != ShareStatus.Pending) return;
+        if (!Visible || WindowState == FormWindowState.Minimized) _tray.ShowBalloonTip(3000, "CastBox screen sharing", $"{request.TvName} wants to watch a screen of this PC.", ToolTipIcon.Info);
+        using var dialog = new ShareApprovalDialog(_screenShare, request);
+        dialog.ShowDialog(this);
+        _screenShare.Resolve(request.Id, dialog.DialogResult == DialogResult.OK ? dialog.Choice : ConsentChoice.Deny);
+        Log($"{request.TvName} asked to watch a screen: {(dialog.DialogResult == DialogResult.OK ? dialog.Choice.ToString() : "not allowed")}.");
+    }
+
+    private void OpenShareDialog()
+    {
+        using var dialog = new ShareScreenDialog(_screenShare, _ffmpegFound || FfmpegLocator.Find(AppContext.BaseDirectory, Environment.GetEnvironmentVariable("PATH")) is not null);
+        dialog.ShowDialog(this);
+        UpdateShareButton();
+    }
+
+    private void UpdateShareButton()
+    {
+        if (_shareButton is null) return;
+        var watching = _screenShare.Sessions.Count;
+        _shareButton.Text = watching > 0 ? $"Sharing ({watching})" : "Share screen";
+    }
+
     private async Task DisconnectMediaLogAsync()
     {
         if (MessageBox.Show(this, "Disconnect CastBox from MediaLog? Watches still waiting to be sent are forgotten. You can connect again any time.", "CastBox", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
@@ -881,5 +997,5 @@ internal sealed class CastBoxForm : Form
         f.Controls.Add(copy); f.Show(this);
     }
     protected override void OnFormClosed(FormClosedEventArgs e) { base.OnFormClosed(e); _log.Dispose(); }
-    private sealed class AppSettings { public int Port { get; set; } = 5078; public string? ServerId { get; set; } public List<string> MediaFolders { get; set; } = new(); public List<string> PersonalFolders { get; set; } = new(); }
+    private sealed class AppSettings { public int Port { get; set; } = 5078; public string? ServerId { get; set; } public List<string> MediaFolders { get; set; } = new(); public List<string> PersonalFolders { get; set; } = new(); public Dictionary<string, string> AllowedTvs { get; set; } = new(); }
 }
