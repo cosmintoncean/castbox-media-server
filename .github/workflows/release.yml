@@ -33,6 +33,23 @@ jobs:
         shell: pwsh
         run: dotnet publish CastBox.Windows.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o publish
 
+      # Screen sharing needs FFmpeg next to CastBox.exe (in an ffmpeg folder). Pinned to one release and checked against its
+      # checksum; 8.0.x because FFmpeg 9 needs a newer NVIDIA driver than many PCs have for hardware encoding.
+      - name: Bundle FFmpeg for screen sharing
+        shell: pwsh
+        run: |
+          $url = 'https://github.com/GyanD/codexffmpeg/releases/download/8.0.1/ffmpeg-8.0.1-essentials_build.zip'
+          $sha256 = 'e2aaeaa0fdbc397d4794828086424d4aaa2102cef1fb6874f6ffd29c0b88b673'
+          Invoke-WebRequest $url -OutFile ffmpeg.zip
+          if ((Get-FileHash ffmpeg.zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne $sha256) { throw 'The FFmpeg download does not match the pinned checksum.' }
+          Expand-Archive ffmpeg.zip ffmpeg-extract
+          $root = Get-ChildItem ffmpeg-extract | Select-Object -First 1
+          New-Item -ItemType Directory publish/ffmpeg | Out-Null
+          Copy-Item "$($root.FullName)/bin/ffmpeg.exe" publish/ffmpeg/
+          Copy-Item "$($root.FullName)/LICENSE" publish/ffmpeg/LICENSE.txt
+          Copy-Item "$($root.FullName)/README.txt" publish/ffmpeg/README.txt
+          Get-ChildItem publish/ffmpeg
+
       - name: Install Inno Setup
         run: choco install innosetup --yes --no-progress
 

@@ -1,5 +1,5 @@
 #define MyAppName "CastBox Server"
-#define MyAppVersion "0.5.0"
+#define MyAppVersion "0.6.0"
 #define MyAppPublisher "CastBox"
 #define MyAppExeName "CastBox.exe"
 
@@ -31,6 +31,8 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 
 [Files]
 Source: "..\publish\CastBox.exe"; DestDir: "{app}"; Flags: ignoreversion
+; FFmpeg (GPL build by gyan.dev) is run as a separate program to capture and encode a shared screen; see ffmpeg\LICENSE.txt
+Source: "..\publish\ffmpeg\*"; DestDir: "{app}\ffmpeg"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
 
 [Icons]
 Name: "{autoprograms}\CastBox Server"; Filename: "{app}\CastBox.exe"
