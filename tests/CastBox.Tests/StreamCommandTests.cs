@@ -57,7 +57,7 @@ public sealed class StreamCommandTests : IDisposable
     {
         var folder = Path.Combine(Path.GetTempPath(), "hls-test");
         var args = StreamCommand.Arguments(new StreamSettings(0, VideoEncoder.X264, new PcmFormat(48000, 2)), folder);
-        Assert.Equal("hls", Value(args, "-f"));
+        Assert.Equal("hls", args[args.ToList().LastIndexOf("-f") + 1]); // the output format (the first -f is the sound input)
         Assert.Equal("1", Value(args, "-hls_time"));
         Assert.Contains("omit_endlist", Value(args, "-hls_flags"));   // live: never ends by itself
         Assert.Contains("delete_segments", Value(args, "-hls_flags")); // old pieces do not pile up on disk
