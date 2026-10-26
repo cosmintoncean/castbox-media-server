@@ -129,24 +129,9 @@ internal sealed class BrandHeader : Control
         try
         {
             using var stream = typeof(Program).Assembly.GetManifestResourceStream("CastBox.CastBox.ico");
-            if (stream is not null) { using var icon = new Icon(stream, new Size(256, 256)); _icon = KeyOutDarkBackground(icon.ToBitmap()); }
+            if (stream is not null) { using var icon = new Icon(stream, new Size(256, 256)); _icon = icon.ToBitmap(); }
         }
         catch { }
-    }
-
-    // The app icon sits on a near-black tile; fade those pixels out so the artwork blends into any theme.
-    private static Bitmap KeyOutDarkBackground(Bitmap source)
-    {
-        var result = new Bitmap(source.Width, source.Height, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
-        for (int y = 0; y < source.Height; y++)
-            for (int x = 0; x < source.Width; x++)
-            {
-                var c = source.GetPixel(x, y);
-                double keep = Math.Clamp((Math.Max(c.R, Math.Max(c.G, c.B)) - 24) / 48.0, 0, 1);
-                result.SetPixel(x, y, Color.FromArgb((int)(c.A * keep), c.R, c.G, c.B));
-            }
-        source.Dispose();
-        return result;
     }
 
     protected override void OnPaint(PaintEventArgs e)
@@ -162,12 +147,12 @@ internal sealed class BrandHeader : Control
         const TextFormatFlags flags = TextFormatFlags.NoPadding | TextFormatFlags.SingleLine;
         using var wordFont = new Font("Segoe UI", 40f, FontStyle.Bold, GraphicsUnit.Point);
         using var tagFont = new Font("Segoe UI Semibold", 16f, FontStyle.Regular, GraphicsUnit.Point);
-        var cast = TextRenderer.MeasureText(g, "Cast", wordFont, Size.Empty, flags);
+        var cast = TextRenderer.MeasureText(g, "Nest", wordFont, Size.Empty, flags);
         var wordHeight = cast.Height;
         var tagHeight = TextRenderer.MeasureText(g, "Your home media server", tagFont, Size.Empty, flags).Height;
         int y = top + (size - (wordHeight + tagHeight)) / 2;
-        TextRenderer.DrawText(g, "Cast", wordFont, new Point(textX, y), ForeColor, flags);
-        TextRenderer.DrawText(g, "Box", wordFont, new Point(textX + cast.Width - 6, y), Amber, flags);
+        TextRenderer.DrawText(g, "Nest", wordFont, new Point(textX, y), ForeColor, flags);
+        TextRenderer.DrawText(g, "Cast", wordFont, new Point(textX + cast.Width - 6, y), Amber, flags);
         var muted = Color.FromArgb((ForeColor.R * 7 + BackColor.R * 3) / 10, (ForeColor.G * 7 + BackColor.G * 3) / 10, (ForeColor.B * 7 + BackColor.B * 3) / 10);
         TextRenderer.DrawText(g, "Your home media server", tagFont, new Point(textX + 4, y + wordHeight - 4), muted, flags);
     }
@@ -303,26 +288,26 @@ internal sealed class CastBoxForm : Form
         setup.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         setup.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 44));
         setup.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 110));
-        setup.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 170));
+        setup.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 130));
         setup.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         setup.Controls.Add(new Label { Text = "Port", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, Font = new Font("Segoe UI", 11) }, 0, 0);
-        _port.Dock = DockStyle.None; _port.Anchor = AnchorStyles.Left | AnchorStyles.Right; _port.Margin = new Padding(0, 22, 8, 0); setup.Controls.Add(_port, 1, 0);
-        var save = MakeButton("Save settings"); StyleButton(save, true); save.Dock = DockStyle.Fill; save.Margin = new Padding(0, 8, 20, 8);
+        _port.Dock = DockStyle.None; _port.Anchor = AnchorStyles.Left | AnchorStyles.Right; _port.Margin = new Padding(0, 0, 8, 0); setup.Controls.Add(_port, 1, 0);
+        var save = MakeButton("Save settings"); StyleButton(save, true); save.Dock = DockStyle.None; save.Anchor = AnchorStyles.Left | AnchorStyles.Right; save.Margin = new Padding(0, 0, 20, 0);
         save.Click += (_, _) => { SaveSettings(); ApplyStartupSetting(); }; setup.Controls.Add(save, 2, 0);
-        _startWithWindows.Dock = DockStyle.Fill; _startWithWindows.Margin = new Padding(0, 0, 0, 0); setup.Controls.Add(_startWithWindows, 3, 0);
+        _startWithWindows.Dock = DockStyle.Fill; _startWithWindows.CheckAlign = ContentAlignment.MiddleLeft; _startWithWindows.TextAlign = ContentAlignment.MiddleLeft; _startWithWindows.Margin = new Padding(0, 0, 0, 0); setup.Controls.Add(_startWithWindows, 3, 0);
         root.Controls.Add(setup, 0, 2);
 
         var serverPanel = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 4, RowCount = 1, BackColor = BackColor, Margin = new Padding(0) };
         serverPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        serverPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 220));
-        serverPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 250));
-        serverPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 200));
+        serverPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 150));
+        serverPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 180));
+        serverPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 150));
         serverPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        StyleButton(_startStop, true); _startStop.Dock = DockStyle.Fill; _startStop.Margin = new Padding(0, 8, 14, 8);
+        StyleButton(_startStop, true); _startStop.Dock = DockStyle.None; _startStop.Anchor = AnchorStyles.Left | AnchorStyles.Right; _startStop.Margin = new Padding(0, 0, 14, 0);
         _startStop.Click += async (_, _) => { if (_server is null) await StartServerAsync(); else await StopServerAsync(); };
-        StyleButton(_firewall, false); _firewall.Dock = DockStyle.Fill; _firewall.Margin = new Padding(0, 8, 14, 8); _firewall.Click += (_, _) => ConfigureFirewall();
+        StyleButton(_firewall, false); _firewall.Dock = DockStyle.None; _firewall.Anchor = AnchorStyles.Left | AnchorStyles.Right; _firewall.Margin = new Padding(0, 0, 14, 0); _firewall.Click += (_, _) => ConfigureFirewall();
         _status.Dock = DockStyle.Fill; _status.TextAlign = ContentAlignment.MiddleLeft; _status.Margin = new Padding(2, 0, 0, 0); _status.Font = new Font("Segoe UI Semibold", 12);
-        _shareButton = MakeButton("Share screen"); StyleButton(_shareButton, false); _shareButton.Glyph = "\uE7F4"; _shareButton.Dock = DockStyle.Fill; _shareButton.Margin = new Padding(0, 8, 14, 8);
+        _shareButton = MakeButton("Share screen"); StyleButton(_shareButton, false); _shareButton.Glyph = "\uE7F4"; _shareButton.Dock = DockStyle.None; _shareButton.Anchor = AnchorStyles.Left | AnchorStyles.Right; _shareButton.Margin = new Padding(0, 0, 14, 0);
         _shareButton.Click += (_, _) => OpenShareDialog();
         serverPanel.Controls.Add(_startStop, 0, 0); serverPanel.Controls.Add(_firewall, 1, 0); serverPanel.Controls.Add(_shareButton, 2, 0); serverPanel.Controls.Add(_status, 3, 0);
         root.Controls.Add(serverPanel, 0, 3);
@@ -332,11 +317,11 @@ internal sealed class CastBoxForm : Form
         bottom.Controls.Add(new Label { Text = "Connection address for your NestCast TV app", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, Font = new Font("Segoe UI Semibold", 12) }, 0, 0);
         var addr = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, BackColor = BackColor, Margin = new Padding(0) };
         addr.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        addr.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); addr.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 200));
-        var addrBox = new RoundedPanel { Dock = DockStyle.Fill, Margin = new Padding(0, 2, 14, 6), Padding = new Padding(2), BackColor = PanelSurface };
+        addr.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); addr.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 150));
+        var addrBox = new RoundedPanel { Dock = DockStyle.None, Anchor = AnchorStyles.Left | AnchorStyles.Right, Height = 52, Margin = new Padding(0, 0, 14, 4), Padding = new Padding(2), BackColor = PanelSurface };
         _address.ForeColor = BrandAmber; _address.Dock = DockStyle.Fill; _address.TextAlign = ContentAlignment.MiddleLeft; _address.Margin = new Padding(0);
         addrBox.Controls.Add(_address);
-        var copy = MakeButton("Copy address"); StyleButton(copy, true); copy.Glyph = "\uE8C8"; copy.Dock = DockStyle.Fill; copy.Margin = new Padding(0, 2, 0, 6);
+        var copy = MakeButton("Copy address"); StyleButton(copy, true); copy.Glyph = "\uE8C8"; copy.Dock = DockStyle.None; copy.Anchor = AnchorStyles.Left | AnchorStyles.Right; copy.MinimumSize = new Size(90, 52); copy.Height = 52; copy.Margin = new Padding(0, 0, 0, 4);
         copy.Click += (_, _) => { if (_address.Text.StartsWith("http")) Clipboard.SetText(_address.Text); };
         addr.Controls.Add(addrBox, 0, 0); addr.Controls.Add(copy, 1, 0); bottom.Controls.Add(addr, 0, 1);
         root.Controls.Add(bottom, 0, 4);
@@ -349,9 +334,9 @@ internal sealed class CastBoxForm : Form
 
     private RoundedButton MakeButton(string text)
     {
-        var b = new RoundedButton { Text = text, AutoSize = false, Height = 46, MinimumSize = new Size(100, 42),
+        var b = new RoundedButton { Text = text, AutoSize = false, Height = 34, MinimumSize = new Size(90, 32),
             FlatStyle = FlatStyle.Flat, BackColor = ButtonSurface, ForeColor = BrandAmber,
-            Font = new Font("Segoe UI Semibold", 10), Padding = new Padding(12, 7, 12, 7),
+            Font = new Font("Segoe UI Semibold", 9.5f), Padding = new Padding(10, 4, 10, 4),
             Margin = new Padding(4), Cursor = Cursors.Hand };
         b.FlatAppearance.BorderSize = 0;
         b.Primary = false;
@@ -364,7 +349,8 @@ internal sealed class CastBoxForm : Form
         b.BackColor = primary ? BrandAmber : ButtonSurface;
         b.ForeColor = primary ? Color.FromArgb(25, 27, 32) : BrandAmber;
         b.FlatAppearance.BorderSize = 0;
-        b.Padding = new Padding(12, 7, 12, 7);
+        b.Padding = new Padding(10, 4, 10, 4);
+        b.Height = 34; b.MinimumSize = new Size(90, 34);
         if (b is RoundedButton rb) rb.Primary = primary;
     }
 
@@ -426,15 +412,15 @@ internal sealed class CastBoxForm : Form
     {
         var panel = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 2, BackColor = BackColor, Margin = new Padding(0, 4, 0, 8) };
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 250));
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 230));
         panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 52));
         panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         panel.Controls.Add(new Label { Text = title, Dock = DockStyle.Fill, TextAlign = ContentAlignment.BottomLeft, Padding = new Padding(0, 0, 0, 8), Font = new Font("Segoe UI Semibold", 12) }, 0, 0);
         var buttons = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = new Padding(0) };
         buttons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50)); buttons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-        var add = MakeButton(addText.Replace(" personal", "")); add.Glyph = "\uE710"; add.Dock = DockStyle.Fill; add.Margin = new Padding(4, 2, 0, 2);
+        var add = MakeButton(addText.Replace(" personal", "")); add.Glyph = "\uE710"; add.Dock = DockStyle.Bottom; add.Margin = new Padding(4, 0, 0, 6);
         add.Click += (_, _) => AddFolder(list, pickerText);
-        var remove = MakeButton("Remove"); remove.Glyph = "\uE738"; remove.Dock = DockStyle.Fill; remove.Margin = new Padding(4, 2, 0, 2);
+        var remove = MakeButton("Remove"); remove.Glyph = "\uE738"; remove.Dock = DockStyle.Bottom; remove.Margin = new Padding(4, 0, 0, 6);
         remove.Click += (_, _) => { if (list.SelectedItem is string selected) { list.Items.Remove(selected); SaveSettings(); Log(removeText + ": " + selected); } };
         buttons.Controls.Add(add, 0, 0); buttons.Controls.Add(remove, 1, 0);
         panel.Controls.Add(buttons, 1, 0);
