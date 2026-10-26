@@ -19,3 +19,7 @@ The Windows control panel now uses a larger, responsive layout inspired by the N
 ## Support
 
 NestCast is free, has no ads and collects nothing. If you like it, you can leave a tip at https://ko-fi.com/comaapps (**Help -> Support NestCast**, or the tray menu).
+
+## Licence
+
+NestCast Server is free software under the [GNU General Public License v3.0](LICENSE). The installer also bundles an FFmpeg build (GPL, from gyan.dev) that runs as a separate program to capture and encode a shared screen; its licence text is installed in the `ffmpeg` folder.
