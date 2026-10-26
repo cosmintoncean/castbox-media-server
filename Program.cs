@@ -236,6 +236,7 @@ internal sealed class CastBoxForm : Form
         var trayMenu = new ContextMenuStrip();
         trayMenu.Items.Add("Open CastBox", null, (_, _) => { Show(); WindowState = FormWindowState.Normal; Activate(); });
         trayMenu.Items.Add("Stop server", null, async (_, _) => await StopServerAsync());
+        trayMenu.Items.Add("Support CastBox (Ko-fi)...", null, (_, _) => OpenDonatePage());
         trayMenu.Items.Add("Exit", null, async (_, _) => { _tray.Visible = false; await StopServerAsync(); Close(); });
         _tray.Text = "CastBox Server"; _tray.Icon = Icon; _tray.ContextMenuStrip = trayMenu;
         _tray.DoubleClick += (_, _) => { Show(); WindowState = FormWindowState.Normal; Activate(); };
@@ -267,6 +268,9 @@ internal sealed class CastBoxForm : Form
         updates.DropDownItems.Add(checkUpdates);
         menu.Items.Add(updates);
         BuildMediaLogMenu(menu);
+        var help = new ToolStripMenuItem("Help");
+        help.DropDownItems.Add(new ToolStripMenuItem("Support CastBox (Ko-fi)...", null, (_, _) => OpenDonatePage()));
+        menu.Items.Add(help);
         MainMenuStrip = menu;
         Controls.Add(menu);
 
@@ -745,7 +749,13 @@ internal sealed class CastBoxForm : Form
 
     // Change this to your GitHub owner/repository before publishing releases.
     private const string GitHubRepository = "cosmintoncean/castbox-media-server";
-    private const string CurrentVersion = "0.7.0";
+    private void OpenDonatePage()
+    {
+        if (!Support.OpenDonatePage())
+            MessageBox.Show(this, $"Couldn't open your browser. You can support CastBox at:\n\n{Support.DonateUrl}", "Support CastBox", MessageBoxButtons.OK, MessageBoxIcon.Information);
+    }
+
+    private const string CurrentVersion = "0.8.0";
 
     private async Task CheckForUpdatesAsync()
     {

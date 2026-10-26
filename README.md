@@ -15,3 +15,7 @@ Use **View → Dark mode / Light mode** to switch between the charcoal/amber and
 ## Full UI redesign
 
 The Windows control panel now uses a larger, responsive layout inspired by the CastBox mock-up, with a larger brand header, grouped library actions, rounded amber-accented buttons, and a View menu for switching between dark and light themes. Dark mode is the default for each launch.
+
+## Support
+
+CastBox is free, has no ads and collects nothing. If you like it, you can leave a tip at https://ko-fi.com/comaapps (**Help -> Support CastBox**, or the tray menu).
