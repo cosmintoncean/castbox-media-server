@@ -63,7 +63,7 @@ internal sealed class MediaLogConnectDialog : Form
 
         var title = MediaLogUi.Label("MediaLog address", bold: true); title.SetBounds(24, 20, 500, 24);
         _address = MediaLogUi.Box(string.IsNullOrWhiteSpace(savedAddress) ? DefaultAddress : savedAddress); _address.SetBounds(24, 48, 512, 28);
-        var hint = MediaLogUi.Label("Check the address, then press Connect. CastBox shows a code and opens MediaLog so you can approve this PC.", muted: true); hint.SetBounds(24, 82, 512, 40);
+        var hint = MediaLogUi.Label("Check the address, then press Connect. NestCast shows a code and opens MediaLog so you can approve this PC.", muted: true); hint.SetBounds(24, 82, 512, 40);
 
         _code.SetBounds(24, 126, 512, 56);
         _status.SetBounds(24, 188, 512, 92);
@@ -101,17 +101,17 @@ internal sealed class MediaLogConnectDialog : Form
         SetStatus("Checking the address…");
         try
         {
-            var (discovery, pairing, url) = await _connector.BeginAsync(_address.Text, "CastBox on " + Environment.MachineName, _cts.Token);
+            var (discovery, pairing, url) = await _connector.BeginAsync(_address.Text, "NestCast on " + Environment.MachineName, _cts.Token);
             _connectUrl = url;
             _code.Text = pairing.UserCode; _code.Visible = true; _openAgain.Visible = true; _copy.Visible = true;
-            SetStatus("Approve “CastBox on " + Environment.MachineName + "” on the MediaLog page that just opened.\nPage didn't open? Go to " + url.Substring(0, url.LastIndexOf('/')) + " and type the code above, or use Copy link.");
+            SetStatus("Approve “NestCast on " + Environment.MachineName + "” on the MediaLog page that just opened.\nPage didn't open? Go to " + url.Substring(0, url.LastIndexOf('/')) + " and type the code above, or use Copy link.");
             OpenPage();
 
             switch (await _connector.WaitAsync(discovery, pairing, _cts.Token))
             {
                 case PairStatus.Approved:
                     _code.Visible = false; _openAgain.Visible = false; _copy.Visible = false;
-                    SetStatus("Connected. CastBox will now mark episodes and movies you finish on the TV as watched in MediaLog.");
+                    SetStatus("Connected. NestCast will now mark episodes and movies you finish on the TV as watched in MediaLog.");
                     _close.Text = "Done";
                     return;
                 case PairStatus.Denied:
@@ -156,7 +156,7 @@ internal sealed class MediaLogConfirmDialog : Form
         MediaLogUi.Style(this, "Needs confirmation", new Size(860, 520));
         MaximizeBox = false;
 
-        var heading = MediaLogUi.Label("Watches CastBox couldn't settle by itself", bold: true); heading.SetBounds(20, 14, 600, 24);
+        var heading = MediaLogUi.Label("Watches NestCast couldn't settle by itself", bold: true); heading.SetBounds(20, 14, 600, 24);
         _items.SetBounds(20, 46, 330, 380);
         _reason.SetBounds(370, 46, 470, 40);
         var candidatesLabel = MediaLogUi.Label("Pick the right title", muted: true); candidatesLabel.SetBounds(370, 90, 470, 20);
@@ -236,8 +236,8 @@ internal sealed class MediaLogConfirmDialog : Form
         if (Selected is not { } item) return;
         var kind = _asMovie.Checked ? WatchKind.Movie : WatchKind.Episode;
         int? Number(TextBox box) => int.TryParse(box.Text.Trim(), out var n) && n >= 0 ? n : null;
-        if (string.IsNullOrWhiteSpace(_title.Text)) { MessageBox.Show(this, "Enter the title.", "CastBox", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
-        if (kind == WatchKind.Episode && (Number(_season) is null || Number(_episode) is null)) { MessageBox.Show(this, "Enter the season and episode numbers.", "CastBox", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
+        if (string.IsNullOrWhiteSpace(_title.Text)) { MessageBox.Show(this, "Enter the title.", "NestCast", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
+        if (kind == WatchKind.Episode && (Number(_season) is null || Number(_episode) is null)) { MessageBox.Show(this, "Enter the season and episode numbers.", "NestCast", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
         _service.SetManual(item.EventId, kind, _title.Text, Number(_year), Number(_season), Number(_episode));
     }
 }

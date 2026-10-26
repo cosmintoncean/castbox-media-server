@@ -5,7 +5,7 @@ namespace CastBox.Chromecast;
 
 /// <summary>
 /// Sends a screen to a Chromecast through Google Cast: FFmpeg writes a live HLS playlist, this PC serves it, and the
-/// Chromecast's built-in player is told to play it. Works even when no CastBox app is open on the Chromecast.
+/// Chromecast's built-in player is told to play it. Works even when no NestCast app is open on the Chromecast.
 /// </summary>
 public sealed partial class CastSessionManager
 {

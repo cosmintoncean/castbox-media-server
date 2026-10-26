@@ -7,11 +7,11 @@ Copy-Item $source (Join-Path $installDir 'CastBox.exe') -Force
 $exe = Join-Path $installDir 'CastBox.exe'
 $desktop = [Environment]::GetFolderPath('Desktop')
 $ws = New-Object -ComObject WScript.Shell
-$shortcut = $ws.CreateShortcut((Join-Path $desktop 'CastBox Server.lnk'))
+$shortcut = $ws.CreateShortcut((Join-Path $desktop 'NestCast Server.lnk'))
 $shortcut.TargetPath = $exe
 $shortcut.WorkingDirectory = $installDir
-$shortcut.Description = 'CastBox home media server'
+$shortcut.Description = 'NestCast home media server'
 $shortcut.Save()
-Write-Host 'CastBox installed for the current Windows user.' -ForegroundColor Green
+Write-Host 'NestCast installed for the current Windows user.' -ForegroundColor Green
 Write-Host 'A desktop shortcut was created. Open it and choose your media folders.'
 Start-Process $exe

@@ -1,6 +1,6 @@
-#define MyAppName "CastBox Server"
-#define MyAppVersion "0.8.0"
-#define MyAppPublisher "CastBox"
+#define MyAppName "NestCast Server"
+#define MyAppVersion "0.8.1"
+#define MyAppPublisher "NestCast"
 #define MyAppExeName "CastBox.exe"
 
 [Setup]
@@ -10,7 +10,7 @@ AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
 DefaultDirName={localappdata}\Programs\CastBox
-DefaultGroupName=CastBox
+DefaultGroupName=NestCast
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 OutputDir=..\installer-output
@@ -34,9 +34,14 @@ Source: "..\publish\CastBox.exe"; DestDir: "{app}"; Flags: ignoreversion
 ; FFmpeg (GPL build by gyan.dev) is run as a separate program to capture and encode a shared screen; see ffmpeg\LICENSE.txt
 Source: "..\publish\ffmpeg\*"; DestDir: "{app}\ffmpeg"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
 
+[InstallDelete]
+; Shortcuts from before the rename to NestCast
+Type: files; Name: "{autoprograms}\CastBox Server.lnk"
+Type: files; Name: "{autodesktop}\CastBox Server.lnk"
+
 [Icons]
-Name: "{autoprograms}\CastBox Server"; Filename: "{app}\CastBox.exe"
-Name: "{autodesktop}\CastBox Server"; Filename: "{app}\CastBox.exe"; Tasks: desktopicon
+Name: "{autoprograms}\NestCast Server"; Filename: "{app}\CastBox.exe"
+Name: "{autodesktop}\NestCast Server"; Filename: "{app}\CastBox.exe"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\CastBox.exe"; Description: "Launch CastBox Server"; Flags: postinstall nowait skipifsilent
+Filename: "{app}\CastBox.exe"; Description: "Launch NestCast Server"; Flags: postinstall nowait skipifsilent

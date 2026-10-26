@@ -1,9 +1,9 @@
 namespace CastBox.ScreenShare;
 
-/// <summary>The H.264 encoders CastBox can use, best first. A video card's own encoder uses almost none of the CPU.</summary>
+/// <summary>The H.264 encoders NestCast can use, best first. A video card's own encoder uses almost none of the CPU.</summary>
 public enum VideoEncoder { Nvenc, Qsv, Amf, X264 }
 
-/// <summary>Raw sound CastBox feeds to FFmpeg on its standard input (32-bit float, interleaved).</summary>
+/// <summary>Raw sound NestCast feeds to FFmpeg on its standard input (32-bit float, interleaved).</summary>
 public sealed record PcmFormat(int SampleRate, int Channels);
 
 public sealed record StreamSettings(int Screen, VideoEncoder Encoder, PcmFormat? Audio, int MaxWidth = 1920, int Fps = 30, int BitrateKbps = 8000);
@@ -64,7 +64,7 @@ public static class StreamCommand
     }
 }
 
-/// <summary>Finds FFmpeg: the copy installed with CastBox first, then any on the PC's PATH.</summary>
+/// <summary>Finds FFmpeg: the copy installed with NestCast first, then any on the PC's PATH.</summary>
 public static class FfmpegLocator
 {
     public static string? Find(string appDirectory, string? pathVariable)

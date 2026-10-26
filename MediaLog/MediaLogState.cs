@@ -80,7 +80,7 @@ public sealed class MediaLogState
     public string? AnonKey { get; set; }
     /// <summary>The app token, encrypted for the current Windows user (DPAPI). Never stored in plain text.</summary>
     public string? TokenProtected { get; set; }
-    /// <summary>What MediaLog calls this connection, e.g. "CastBox on COma".</summary>
+    /// <summary>What MediaLog calls this connection, e.g. "NestCast on COma".</summary>
     public string? Label { get; set; }
     /// <summary>The MediaLog username of the connected account (null if the person hasn't chosen one) and its opaque id.</summary>
     public string? Username { get; set; }

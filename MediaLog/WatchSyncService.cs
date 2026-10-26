@@ -89,7 +89,7 @@ public sealed class WatchSyncService
             if (parsed.Kind == WatchKind.Unknown)
             {
                 item.State = WatchState.NeedsConfirmation;
-                item.Reason = "CastBox couldn't tell what this file is from its name.";
+                item.Reason = "NestCast couldn't tell what this file is from its name.";
             }
             else if (s.Mappings.TryGetValue(MappingKey(item)!, out var mapping) && mapping.DontSync) return EnqueueResult.Ignored;
             s.Queue.Add(item);
@@ -263,7 +263,7 @@ public sealed class WatchSyncService
         Changed?.Invoke();
     }
 
-    /// <summary>For files CastBox couldn't read a title from: the person says what it is.</summary>
+    /// <summary>For files NestCast couldn't read a title from: the person says what it is.</summary>
     public void SetManual(string eventId, WatchKind kind, string title, int? year, int? season, int? episode)
     {
         if (kind == WatchKind.Unknown || string.IsNullOrWhiteSpace(title)) return;
@@ -400,7 +400,7 @@ public sealed class MediaLogConnector
     private async Task<WhoAmI> SafeWhoAmIAsync(Discovery discovery, string token, CancellationToken ct)
     {
         try { return await _client.WhoAmIAsync(discovery, token, ct).ConfigureAwait(false); }
-        catch (MediaLogException) { return new WhoAmI("CastBox", null, null); }
+        catch (MediaLogException) { return new WhoAmI("NestCast", null, null); }
     }
 
     /// <summary>Tells MediaLog to revoke the token (best effort), then forgets it here.</summary>

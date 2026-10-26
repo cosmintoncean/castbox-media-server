@@ -2,7 +2,7 @@ using System.Diagnostics;
 
 namespace CastBox;
 
-/// <summary>Where people can support CastBox. Opening it is the only thing this does: no tracking, no data sent.</summary>
+/// <summary>Where people can support NestCast. Opening it is the only thing this does: no tracking, no data sent.</summary>
 public static class Support
 {
     public const string DonateUrl = "https://ko-fi.com/comaapps";

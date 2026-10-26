@@ -110,14 +110,14 @@ public sealed class HttpMediaLogClient : IMediaLogClient
         if (status == HttpStatusCode.Unauthorized) throw new MediaLogException("MediaLog no longer accepts this connection. Connect again.");
         if (status != HttpStatusCode.OK || json is null) throw Failure(status, json, "check the connection");
         var username = (string?)json["username"];
-        return new WhoAmI((string?)json["label"] ?? "CastBox", string.IsNullOrWhiteSpace(username) ? null : username, (string?)json["accountId"]);
+        return new WhoAmI((string?)json["label"] ?? "NestCast", string.IsNullOrWhiteSpace(username) ? null : username, (string?)json["accountId"]);
     }
 
     public async Task RevokeAsync(Discovery discovery, string token, CancellationToken ct)
     {
         var (status, _) = await PostAsync(discovery, token, new JsonObject { ["action"] = "revoke" }, ct).ConfigureAwait(false);
         // Already revoked is as good as revoked.
-        if (status is not (HttpStatusCode.OK or HttpStatusCode.Unauthorized)) throw new MediaLogException("MediaLog couldn't be reached to disconnect. You can remove CastBox under Connected apps in MediaLog.");
+        if (status is not (HttpStatusCode.OK or HttpStatusCode.Unauthorized)) throw new MediaLogException("MediaLog couldn't be reached to disconnect. You can remove NestCast under Connected apps in MediaLog.");
     }
 
     public async Task<LogResult> LogWatchAsync(Discovery discovery, string token, WatchRequest request, CancellationToken ct)

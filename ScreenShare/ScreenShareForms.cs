@@ -16,7 +16,7 @@ internal sealed class ShareApprovalDialog : Form
     {
         _service = service; _request = request;
         var screen = service.GetScreen(request.Screen);
-        MediaLogUi.Style(this, "CastBox screen sharing", new Size(540, 250));
+        MediaLogUi.Style(this, "NestCast screen sharing", new Size(540, 250));
         StartPosition = FormStartPosition.CenterScreen; TopMost = true; ShowInTaskbar = true;
 
         var what = screen is null ? "a screen" : $"{screen.Name} ({screen.Width}×{screen.Height})";
@@ -37,14 +37,14 @@ internal sealed class ShareApprovalDialog : Form
     private void Answer(ConsentChoice choice) { Choice = choice; DialogResult = DialogResult.OK; Close(); }
 }
 
-/// <summary>One place a screen can be sent: a Chromecast found on the network, and/or a TV with the CastBox app open.</summary>
+/// <summary>One place a screen can be sent: a Chromecast found on the network, and/or a TV with the NestCast app open.</summary>
 public sealed record ShareTarget(string Name, CastDevice? Device, TvInfo? App)
 {
-    /// <summary>With the CastBox app open the screen is pushed to it (low delay); otherwise it goes through Google Cast.</summary>
-    public string Route => App is not null ? "CastBox is open: instant, low delay" : "Google Cast: a few seconds' delay";
+    /// <summary>With the NestCast app open the screen is pushed to it (low delay); otherwise it goes through Google Cast.</summary>
+    public string Route => App is not null ? "NestCast is open: instant, low delay" : "Google Cast: a few seconds' delay";
     public override string ToString() => $"{Name}      {Route}";
 
-    /// <summary>Chromecasts first, matched with an open CastBox app by network address; then other TVs that have the app open.</summary>
+    /// <summary>Chromecasts first, matched with an open NestCast app by network address; then other TVs that have the app open.</summary>
     public static IReadOnlyList<ShareTarget> Combine(IReadOnlyList<CastDevice> devices, IReadOnlyList<TvInfo> apps)
     {
         var list = new List<ShareTarget>();
@@ -60,7 +60,7 @@ public sealed record ShareTarget(string Name, CastDevice? Device, TvInfo? App)
     }
 }
 
-/// <summary>"Share screen": send one of this PC's screens to a Chromecast or a TV with CastBox open, see what is being watched, stop it, and forget TVs.</summary>
+/// <summary>"Share screen": send one of this PC's screens to a Chromecast or a TV with NestCast open, see what is being watched, stop it, and forget TVs.</summary>
 internal sealed class ShareScreenDialog : Form
 {
     private readonly ScreenShareService _service;
@@ -99,8 +99,8 @@ internal sealed class ShareScreenDialog : Form
         _searching.SetBounds(520, 18, 176, 22); _searching.TextAlign = ContentAlignment.MiddleRight;
         _targets.SetBounds(338, 44, 358, 100);
         var hint = MediaLogUi.Label(ffmpegAvailable
-            ? "Chromecasts on your network are listed. If CastBox is open on one, the screen opens there instantly; otherwise it is sent through Google Cast, which works with nothing open but has a few seconds' delay."
-            : "FFmpeg was not found, so this PC can't share its screen yet. Reinstall CastBox or put ffmpeg.exe in the CastBox folder's ffmpeg subfolder.", muted: ffmpegAvailable);
+            ? "Chromecasts on your network are listed. If NestCast is open on one, the screen opens there instantly; otherwise it is sent through Google Cast, which works with nothing open but has a few seconds' delay."
+            : "FFmpeg was not found, so this PC can't share its screen yet. Reinstall NestCast or put ffmpeg.exe in the NestCast folder's ffmpeg subfolder.", muted: ffmpegAvailable);
         hint.SetBounds(24, 152, 672, 46);
         _share = MediaLogUi.Button("Share", true, async (_, _) => await ShareAsync()); _share.SetBounds(24, 204, 150, 42); _share.Enabled = ffmpegAvailable;
         _status.SetBounds(186, 206, 510, 40);

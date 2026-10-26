@@ -108,7 +108,7 @@ public sealed class ConnectorTests : IDisposable
         var (discovery, pairing, _) = await _connector.BeginAsync("https://thinglog.netlify.app", "x", CancellationToken.None);
         _mediaLog.Polls.Enqueue(new PairPoll(PairStatus.Approved, "mla_secret"));
         Assert.Equal(PairStatus.Approved, await _connector.WaitAsync(discovery, pairing, CancellationToken.None));
-        Assert.Equal("CastBox", _store.Read(s => s.Label));
+        Assert.Equal("NestCast", _store.Read(s => s.Label));
     }
 
     [Theory]

@@ -17,7 +17,7 @@ public interface ITvMaze
 
 /// <summary>
 /// TVmaze (api.tvmaze.com): free, no key. Only the cleaned show title is sent. Its data is licensed CC BY-SA;
-/// CastBox uses the ids only and shows none of it.
+/// NestCast uses the ids only and shows none of it.
 /// </summary>
 public sealed class TvMazeClient : ITvMaze
 {

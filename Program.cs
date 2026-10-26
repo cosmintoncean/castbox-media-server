@@ -177,7 +177,7 @@ internal sealed class BrandHeader : Control
 
 internal sealed class CastBoxForm : Form
 {
-    // CASTBOX_DATA_DIR lets a test copy of CastBox keep its settings, MediaLog connection and thumbnails apart from the real ones.
+    // CASTBOX_DATA_DIR lets a test copy of NestCast keep its settings, MediaLog connection and thumbnails apart from the real ones.
     private readonly string _dataDir = Environment.GetEnvironmentVariable("CASTBOX_DATA_DIR") is { Length: > 0 } custom
         ? custom : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CastBox");
     private readonly string _configPath;
@@ -187,7 +187,7 @@ internal sealed class CastBoxForm : Form
     private readonly Label _status = new StatusLabel { Text = "Server stopped" };
     private readonly Label _address = new() { AutoSize = false, Text = "Not running", Font = new Font("Segoe UI Semibold", 16), Padding = new Padding(18, 0, 0, 0) };
     private readonly NumericUpDown _port = new() { Minimum = 1024, Maximum = 65535, Value = 5078, Width = 100, Font = new Font("Segoe UI", 11), BorderStyle = BorderStyle.FixedSingle };
-    private readonly CheckBox _startWithWindows = new() { Text = "Start CastBox when I sign in to Windows", AutoSize = true };
+    private readonly CheckBox _startWithWindows = new() { Text = "Start NestCast when I sign in to Windows", AutoSize = true };
     private readonly RoundedButton _startStop = new() { Text = "Start server", Glyph = "\uE768" };
     private readonly RoundedButton _firewall = new() { Text = "Configure firewall", Glyph = "\uEA18" };
     private readonly TextBox _log = new() { Dock = DockStyle.Fill, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical };
@@ -217,13 +217,13 @@ internal sealed class CastBoxForm : Form
         _configPath = Path.Combine(_dataDir, "settings.json");
         Directory.CreateDirectory(_dataDir);
         var http = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
-        http.DefaultRequestHeaders.UserAgent.ParseAdd("CastBox/" + CurrentVersion);
+        http.DefaultRequestHeaders.UserAgent.ParseAdd("NestCast/" + CurrentVersion);
         var mediaLogClient = new HttpMediaLogClient(http);
         _mediaLogStore = new MediaLogStore(Path.Combine(_dataDir, "medialog.json"), new DpapiProtector());
         _mediaLogService = new WatchSyncService(_mediaLogStore, mediaLogClient, new TvMazeClient(http), log: LogAny);
         _mediaLogConnector = new MediaLogConnector(_mediaLogStore, mediaLogClient, _mediaLogService);
         _mediaLogService.Changed += () => { if (IsHandleCreated && !IsDisposed) { try { BeginInvoke(new Action(UpdateMediaLogMenu)); } catch (ObjectDisposedException) { } } };
-        Text = "CastBox Server";
+        Text = "NestCast Server";
         try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath) ?? SystemIcons.Application; } catch { Icon = SystemIcons.Application; }
         Width = 1040; Height = 960; MinimumSize = new Size(900, 840);
         StartPosition = FormStartPosition.CenterScreen;
@@ -234,13 +234,13 @@ internal sealed class CastBoxForm : Form
         _screenShare.ApprovalNeeded += request => { if (IsHandleCreated && !IsDisposed) { try { BeginInvoke(new Action(() => AskShareApproval(request))); } catch (ObjectDisposedException) { } } };
         BuildLayout(); LoadSettings(); ApplyTheme();
         var trayMenu = new ContextMenuStrip();
-        trayMenu.Items.Add("Open CastBox", null, (_, _) => { Show(); WindowState = FormWindowState.Normal; Activate(); });
+        trayMenu.Items.Add("Open NestCast", null, (_, _) => { Show(); WindowState = FormWindowState.Normal; Activate(); });
         trayMenu.Items.Add("Stop server", null, async (_, _) => await StopServerAsync());
-        trayMenu.Items.Add("Support CastBox (Ko-fi)...", null, (_, _) => OpenDonatePage());
+        trayMenu.Items.Add("Support NestCast (Ko-fi)...", null, (_, _) => OpenDonatePage());
         trayMenu.Items.Add("Exit", null, async (_, _) => { _tray.Visible = false; await StopServerAsync(); Close(); });
-        _tray.Text = "CastBox Server"; _tray.Icon = Icon; _tray.ContextMenuStrip = trayMenu;
+        _tray.Text = "NestCast Server"; _tray.Icon = Icon; _tray.ContextMenuStrip = trayMenu;
         _tray.DoubleClick += (_, _) => { Show(); WindowState = FormWindowState.Normal; Activate(); };
-        FormClosing += async (_, e) => { if (e.CloseReason == CloseReason.UserClosing && _server is not null) { e.Cancel = true; Hide(); _tray.Visible = true; _tray.ShowBalloonTip(1500, "CastBox is running", "The media server continues in the background.", ToolTipIcon.Info); } else { _syncCts.Cancel(); _screenShare.StopAll(); _tray.Visible = false; await StopServerAsync(); } };
+        FormClosing += async (_, e) => { if (e.CloseReason == CloseReason.UserClosing && _server is not null) { e.Cancel = true; Hide(); _tray.Visible = true; _tray.ShowBalloonTip(1500, "NestCast is running", "The media server continues in the background.", ToolTipIcon.Info); } else { _syncCts.Cancel(); _screenShare.StopAll(); _tray.Visible = false; await StopServerAsync(); } };
         Shown += async (_, _) => { _ = Task.Run(() => _mediaLogService.RunAsync(_syncCts.Token)); UpdateMediaLogMenu(); if (_startWithWindows.Checked || _launchInBackground) await StartServerAsync(); if (_launchInBackground && _server is not null) { Hide(); _tray.Visible = true; } };
     }
 
@@ -269,7 +269,7 @@ internal sealed class CastBoxForm : Form
         menu.Items.Add(updates);
         BuildMediaLogMenu(menu);
         var help = new ToolStripMenuItem("Help");
-        help.DropDownItems.Add(new ToolStripMenuItem("Support CastBox (Ko-fi)...", null, (_, _) => OpenDonatePage()));
+        help.DropDownItems.Add(new ToolStripMenuItem("Support NestCast (Ko-fi)...", null, (_, _) => OpenDonatePage()));
         menu.Items.Add(help);
         MainMenuStrip = menu;
         Controls.Add(menu);
@@ -329,7 +329,7 @@ internal sealed class CastBoxForm : Form
 
         var bottom = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, BackColor = BackColor, Margin = new Padding(0, 4, 0, 0) };
         bottom.RowStyles.Add(new RowStyle(SizeType.Absolute, 36)); bottom.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        bottom.Controls.Add(new Label { Text = "Connection address for your CastBox TV app", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, Font = new Font("Segoe UI Semibold", 12) }, 0, 0);
+        bottom.Controls.Add(new Label { Text = "Connection address for your NestCast TV app", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, Font = new Font("Segoe UI Semibold", 12) }, 0, 0);
         var addr = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, BackColor = BackColor, Margin = new Padding(0) };
         addr.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         addr.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); addr.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 200));
@@ -492,14 +492,14 @@ internal sealed class CastBoxForm : Form
             Log("Settings saved.");
             if (_server is not null) Log("Restart the server to apply the changed port or folder list.");
         }
-        catch (Exception ex) { MessageBox.Show(this, "Couldn't save settings: " + ex.Message, "CastBox", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+        catch (Exception ex) { MessageBox.Show(this, "Couldn't save settings: " + ex.Message, "NestCast", MessageBoxButtons.OK, MessageBoxIcon.Error); }
     }
 
     private async Task StartServerAsync()
     {
         if (_server is not null) return;
         SaveSettings();
-        if (_folders.Items.Count == 0 && _personal.Items.Count == 0) { MessageBox.Show(this, "Add at least one folder first.", "CastBox", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
+        if (_folders.Items.Count == 0 && _personal.Items.Count == 0) { MessageBox.Show(this, "Add at least one folder first.", "NestCast", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
         try
         {
             var port = (int)_port.Value;
@@ -527,7 +527,7 @@ internal sealed class CastBoxForm : Form
                 }
                 return null;
             }
-            app.MapGet("/api/health", () => Results.Ok(new { status = "ok", name = "CastBox", folders = configuredFolders.Count, personalFolders = personalFolders.Count, serverId = _serverId }));
+            app.MapGet("/api/health", () => Results.Ok(new { status = "ok", name = "NestCast", folders = configuredFolders.Count, personalFolders = personalFolders.Count, serverId = _serverId }));
             // Which MediaLog account this PC reports to, so the TV can ask "who's watching?" when PCs differ.
             app.MapGet("/api/medialog", () =>
             {
@@ -698,7 +698,7 @@ internal sealed class CastBoxForm : Form
             var castManager = _castManager;
             ScreenEndpoints.Map(app, _screenShare, streamer, Lan, port, LogAny, (session, name) =>
             {
-                try { BeginInvoke(new Action(() => _tray.ShowBalloonTip(2500, "CastBox screen sharing", $"{session.TvName} is watching {name}.", ToolTipIcon.Info))); } catch (ObjectDisposedException) { }
+                try { BeginInvoke(new Action(() => _tray.ShowBalloonTip(2500, "NestCast screen sharing", $"{session.TvName} is watching {name}.", ToolTipIcon.Info))); } catch (ObjectDisposedException) { }
             }, hlsFile: castManager is null ? null : castManager.FileFor);
             // The TV reports that it finished a file; MediaLog gets it in the background (MediaLog/WatchSyncService.cs).
             app.MapPost("/api/watched", async (HttpContext ctx) =>
@@ -735,7 +735,7 @@ internal sealed class CastBoxForm : Form
             _status.Text = "Running"; _status.ForeColor = Color.LightGreen; _startStop.Text = "Stop server"; _startStop.Glyph = "\u25A0"; StyleButton(_startStop, false);
             _address.Text = $"http://{GetLanIp()}:{port}"; Log("Server started at " + _address.Text);
         }
-        catch (Exception ex) { _server = null; MessageBox.Show(this, "Couldn't start the server. Check whether the port is already in use.\n\n" + ex.Message, "CastBox", MessageBoxButtons.OK, MessageBoxIcon.Error); Log("Start failed: " + ex); }
+        catch (Exception ex) { _server = null; MessageBox.Show(this, "Couldn't start the server. Check whether the port is already in use.\n\n" + ex.Message, "NestCast", MessageBoxButtons.OK, MessageBoxIcon.Error); Log("Start failed: " + ex); }
     }
 
     private async Task StopServerAsync()
@@ -752,15 +752,15 @@ internal sealed class CastBoxForm : Form
     private void OpenDonatePage()
     {
         if (!Support.OpenDonatePage())
-            MessageBox.Show(this, $"Couldn't open your browser. You can support CastBox at:\n\n{Support.DonateUrl}", "Support CastBox", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            MessageBox.Show(this, $"Couldn't open your browser. You can support NestCast at:\n\n{Support.DonateUrl}", "Support NestCast", MessageBoxButtons.OK, MessageBoxIcon.Information);
     }
 
-    private const string CurrentVersion = "0.8.0";
+    private const string CurrentVersion = "0.8.1";
 
     private async Task CheckForUpdatesAsync()
     {
         using var http = new HttpClient();
-        http.DefaultRequestHeaders.UserAgent.ParseAdd("CastBox-Updater/1.0");
+        http.DefaultRequestHeaders.UserAgent.ParseAdd("NestCast-Updater/1.0");
         http.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
         try
         {
@@ -772,7 +772,7 @@ internal sealed class CastBoxForm : Form
                     response.StatusCode == HttpStatusCode.NotFound
                         ? "No published release was found. Check that the GitHub repository is public and has a release, and update GitHubRepository in Program.cs."
                         : $"GitHub returned {(int)response.StatusCode} ({response.ReasonPhrase}). Try again later.",
-                    "CastBox updates", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    "NestCast updates", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
@@ -782,13 +782,13 @@ internal sealed class CastBoxForm : Form
             var notes = root.TryGetProperty("body", out var bodyElement) ? bodyElement.GetString() : "";
             if (string.IsNullOrWhiteSpace(tag) || !Version.TryParse(tag, out var latest))
             {
-                MessageBox.Show(this, "The latest GitHub release has no valid version tag. Use tags such as v0.1.1.", "CastBox updates", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(this, "The latest GitHub release has no valid version tag. Use tags such as v0.1.1.", "NestCast updates", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
             if (!Version.TryParse(CurrentVersion, out var current)) current = new Version(0, 1, 0);
             if (latest <= current)
             {
-                MessageBox.Show(this, $"You're up to date. Installed version: {CurrentVersion}.", "CastBox updates", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show(this, $"You're up to date. Installed version: {CurrentVersion}.", "NestCast updates", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
@@ -800,13 +800,13 @@ internal sealed class CastBoxForm : Form
 
             if (string.IsNullOrWhiteSpace(installerUrl))
             {
-                if (MessageBox.Show(this, $"Version {tag} is available, but the release doesn't contain CastBox-Setup.exe.\n\nOpen the release page to download it manually?", "CastBox updates", MessageBoxButtons.YesNo, MessageBoxIcon.Information) == DialogResult.Yes)
+                if (MessageBox.Show(this, $"Version {tag} is available, but the release doesn't contain CastBox-Setup.exe.\n\nOpen the release page to download it manually?", "NestCast updates", MessageBoxButtons.YesNo, MessageBoxIcon.Information) == DialogResult.Yes)
                     Process.Start(new ProcessStartInfo($"https://github.com/{GitHubRepository}/releases/latest") { UseShellExecute = true });
                 return;
             }
 
-            var prompt = $"CastBox {tag} is available (installed: {CurrentVersion}).\n\n{notes}\n\nDownload and launch the installer? CastBox will close during installation.";
-            if (MessageBox.Show(this, prompt, "CastBox update available", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+            var prompt = $"NestCast {tag} is available (installed: {CurrentVersion}).\n\n{notes}\n\nDownload and launch the installer? NestCast will close during installation.";
+            if (MessageBox.Show(this, prompt, "NestCast update available", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
 
             var tempInstaller = Path.Combine(Path.GetTempPath(), "CastBox-Setup.exe");
             using (var download = await http.GetAsync(installerUrl, HttpCompletionOption.ResponseHeadersRead))
@@ -823,7 +823,7 @@ internal sealed class CastBoxForm : Form
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, "Couldn't check or download updates. Check your internet connection and GitHub release configuration.\n\n" + ex.Message, "CastBox updates", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            MessageBox.Show(this, "Couldn't check or download updates. Check your internet connection and GitHub release configuration.\n\n" + ex.Message, "NestCast updates", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             Log("Update check failed: " + ex.Message);
         }
     }
@@ -833,13 +833,13 @@ internal sealed class CastBoxForm : Form
         try
         {
             var exe = Application.ExecutablePath;
-            var command = $"advfirewall firewall add rule name=\"CastBox Media Server TCP {(int)_port.Value}\" dir=in action=allow protocol=TCP localport={(int)_port.Value} profile=private";
+            var command = $"advfirewall firewall add rule name=\"NestCast Media Server TCP {(int)_port.Value}\" dir=in action=allow protocol=TCP localport={(int)_port.Value} profile=private";
             var psi = new ProcessStartInfo("netsh.exe", command) { UseShellExecute = true, Verb = "runas" };
             Process.Start(psi);
             Log("Requested an administrator approval to add the private-network firewall rule for TCP " + (int)_port.Value + ".");
-            MessageBox.Show(this, "Windows may ask for administrator approval. Allow the CastBox port on private networks only.", "CastBox", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            MessageBox.Show(this, "Windows may ask for administrator approval. Allow the NestCast port on private networks only.", "NestCast", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
-        catch (Exception ex) { MessageBox.Show(this, "Firewall setup couldn't be started: " + ex.Message, "CastBox", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+        catch (Exception ex) { MessageBox.Show(this, "Firewall setup couldn't be started: " + ex.Message, "NestCast", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
     }
 
     private bool IsStartupEnabled()
@@ -852,9 +852,9 @@ internal sealed class CastBoxForm : Form
         {
             using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", true) ?? Microsoft.Win32.Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run");
             if (_startWithWindows.Checked) key.SetValue("CastBox", "\"" + Application.ExecutablePath + "\" --background"); else key.DeleteValue("CastBox", false);
-            Log(_startWithWindows.Checked ? "CastBox will start when you sign in to Windows." : "Automatic startup disabled.");
+            Log(_startWithWindows.Checked ? "NestCast will start when you sign in to Windows." : "Automatic startup disabled.");
         }
-        catch (Exception ex) { MessageBox.Show(this, "Couldn't update startup setting: " + ex.Message, "CastBox", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+        catch (Exception ex) { MessageBox.Show(this, "Couldn't update startup setting: " + ex.Message, "NestCast", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
     }
     private static string GetLanIp()
     {
@@ -885,7 +885,7 @@ internal sealed class CastBoxForm : Form
         _mlForget = new ToolStripMenuItem("Forget saved choices");
         _mlForget.Click += (_, _) =>
         {
-            if (MessageBox.Show(this, "Forget which MediaLog titles you confirmed and the show lookups CastBox saved? They will be worked out again next time.", "CastBox", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes) _mediaLogService.ForgetSavedChoices();
+            if (MessageBox.Show(this, "Forget which MediaLog titles you confirmed and the show lookups NestCast saved? They will be worked out again next time.", "NestCast", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes) _mediaLogService.ForgetSavedChoices();
         };
         _mlDisconnect = new ToolStripMenuItem("Disconnect");
         _mlDisconnect.Click += async (_, _) => await DisconnectMediaLogAsync();
@@ -897,7 +897,7 @@ internal sealed class CastBoxForm : Form
     private void AskShareApproval(ShareRequest request)
     {
         if (_screenShare.Poll(request.Id)?.Status != ShareStatus.Pending) return;
-        if (!Visible || WindowState == FormWindowState.Minimized) _tray.ShowBalloonTip(3000, "CastBox screen sharing", $"{request.TvName} wants to watch a screen of this PC.", ToolTipIcon.Info);
+        if (!Visible || WindowState == FormWindowState.Minimized) _tray.ShowBalloonTip(3000, "NestCast screen sharing", $"{request.TvName} wants to watch a screen of this PC.", ToolTipIcon.Info);
         using var dialog = new ShareApprovalDialog(_screenShare, request);
         dialog.ShowDialog(this);
         _screenShare.Resolve(request.Id, dialog.DialogResult == DialogResult.OK ? dialog.Choice : ConsentChoice.Deny);
@@ -923,9 +923,9 @@ internal sealed class CastBoxForm : Form
 
     private async Task DisconnectMediaLogAsync()
     {
-        if (MessageBox.Show(this, "Disconnect CastBox from MediaLog? Watches still waiting to be sent are forgotten. You can connect again any time.", "CastBox", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+        if (MessageBox.Show(this, "Disconnect NestCast from MediaLog? Watches still waiting to be sent are forgotten. You can connect again any time.", "NestCast", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
         try { await _mediaLogConnector.DisconnectAsync(CancellationToken.None); }
-        catch (MediaLogException ex) { MessageBox.Show(this, "CastBox is disconnected here, but MediaLog couldn't be told: " + ex.Message, "CastBox", MessageBoxButtons.OK, MessageBoxIcon.Information); }
+        catch (MediaLogException ex) { MessageBox.Show(this, "NestCast is disconnected here, but MediaLog couldn't be told: " + ex.Message, "NestCast", MessageBoxButtons.OK, MessageBoxIcon.Information); }
         UpdateMediaLogMenu();
     }
 
@@ -948,7 +948,7 @@ internal sealed class CastBoxForm : Form
     private void Log(string line) { if (_log.IsDisposed) return; _log.AppendText($"[{DateTime.Now:HH:mm:ss}] {line}{Environment.NewLine}"); }
     private void ShowLogWindow()
     {
-        var f = new Form { Text = "CastBox server log", Width = 700, Height = 400, StartPosition = FormStartPosition.CenterParent, BackColor = BackColor, ForeColor = ForeColor };
+        var f = new Form { Text = "NestCast server log", Width = 700, Height = 400, StartPosition = FormStartPosition.CenterParent, BackColor = BackColor, ForeColor = ForeColor };
         var copy = new TextBox { Dock = DockStyle.Fill, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Both, Text = _log.Text, BackColor = Color.FromArgb(18, 20, 24), ForeColor = ForeColor };
         f.Controls.Add(copy); f.Show(this);
     }
