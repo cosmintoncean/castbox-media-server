@@ -179,7 +179,7 @@ internal sealed class ShareScreenDialog : Form
             return;
         }
         _busy = true; _share.Enabled = false;
-        SetStatus($"Connecting to {target.Name}… (a few seconds)", false);
+        SetStatus($"Starting Google Cast on {target.Name}… (about 3 seconds, up to 15 the first time)", false);
         try
         {
             await _castTo(target.Device!, screen, _cts.Token);
