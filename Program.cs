@@ -10,6 +10,7 @@ using System.Globalization;
 using System.Text.Json.Nodes;
 using CastBox.MediaLog;
 using CastBox.Personal;
+using CastBox.Chromecast;
 using CastBox.ScreenShare;
 using Microsoft.AspNetCore.StaticFiles;
 
@@ -207,6 +208,7 @@ internal sealed class CastBoxForm : Form
     // Screen sharing: a TV may watch one of this PC's screens only after the person here said yes (ScreenShare/).
     private readonly ScreenShareService _screenShare;
     private RoundedButton? _shareButton;
+    private CastSessionManager? _castManager;
     private bool _ffmpegFound;
 
     public CastBoxForm(bool launchInBackground)
@@ -686,10 +688,14 @@ internal sealed class CastBoxForm : Form
             _ffmpegFound = ffmpegPath is not null;
             var streamer = ffmpegPath is null ? null : new ScreenStreamer(ffmpegPath, LogAny);
             if (streamer is null) LogAny("Screen sharing is off: FFmpeg was not found (see the ffmpeg folder next to CastBox.exe).");
+            // Casting to a Chromecast through Google Cast: FFmpeg writes an HLS playlist that this server serves to it.
+            _castManager = streamer is null ? null : new CastSessionManager(_screenShare, streamer, Lan, () => port,
+                async (address, castPort, ct) => await CastConnection.ConnectAsync(address, castPort, ct), Path.Combine(Path.GetTempPath(), "castbox-hls"), LogAny);
+            var castManager = _castManager;
             ScreenEndpoints.Map(app, _screenShare, streamer, Lan, port, LogAny, (session, name) =>
             {
                 try { BeginInvoke(new Action(() => _tray.ShowBalloonTip(2500, "CastBox screen sharing", $"{session.TvName} is watching {name}.", ToolTipIcon.Info))); } catch (ObjectDisposedException) { }
-            });
+            }, hlsFile: castManager is null ? null : castManager.FileFor);
             // The TV reports that it finished a file; MediaLog gets it in the background (MediaLog/WatchSyncService.cs).
             app.MapPost("/api/watched", async (HttpContext ctx) =>
             {
@@ -732,6 +738,7 @@ internal sealed class CastBoxForm : Form
     {
         if (_server is null) return;
         _screenShare.StopAll();
+        if (_castManager is not null) await _castManager.StopAllAsync();
         try { await _server.StopAsync(); await _server.DisposeAsync(); } catch { }
         _server = null; _status.Text = "Server stopped"; _status.ForeColor = ForeColor; _startStop.Text = "Start server"; _startStop.Glyph = "\uE768"; StyleButton(_startStop, true); _address.Text = "Not running"; Log("Server stopped.");
     }
@@ -889,7 +896,10 @@ internal sealed class CastBoxForm : Form
 
     private void OpenShareDialog()
     {
-        using var dialog = new ShareScreenDialog(_screenShare, _ffmpegFound || FfmpegLocator.Find(AppContext.BaseDirectory, Environment.GetEnvironmentVariable("PATH")) is not null);
+        using var dialog = new ShareScreenDialog(_screenShare, _ffmpegFound || FfmpegLocator.Find(AppContext.BaseDirectory, Environment.GetEnvironmentVariable("PATH")) is not null,
+            ct => CastDiscovery.FindAsync(TimeSpan.FromSeconds(2.5), ct),
+            (device, screen, ct) => _castManager is { } manager && _server is not null ? manager.StartAsync(device, screen, ct)
+                : throw new CastException("Start the server first (the Start server button), then share."));
         dialog.ShowDialog(this);
         UpdateShareButton();
     }

@@ -67,16 +67,30 @@ public sealed partial class CastSessionManager
         lock (_lock) _active[session.Id] = active;
         try
         {
+            using var both = CancellationTokenSource.CreateLinkedTokenSource(ct, active.Cts.Token);
             var run = Task.Run(() => _streamer.RunHlsAsync(screen, active.Directory, active.Cts.Token));
             _ = run.ContinueWith(t => { if (t.IsFaulted) _log("Capture failed: " + t.Exception!.GetBaseException().Message); _ = EndAsync(active); }, TaskScheduler.Default);
-            await WaitForPlaylistAsync(active.Directory, run, ct).ConfigureAwait(false);
 
-            var cast = await _connect(device.Address, device.Port, ct).ConfigureAwait(false);
-            active.Cast = cast;
-            cast.Closed += () => _ = EndAsync(active);
-            await cast.LaunchPlayerAsync(ct).ConfigureAwait(false);
+            // Starting the screen capture and starting Google's player on the Chromecast (which takes the longest) happen at the same time.
+            var ready = WaitForPlaylistAsync(active.Directory, run, both.Token);
+            var player = Task.Run(async () =>
+            {
+                var cast = await _connect(device.Address, device.Port, both.Token).ConfigureAwait(false);
+                active.Cast = cast;
+                cast.Closed += () => _ = EndAsync(active);
+                await cast.LaunchPlayerAsync(both.Token).ConfigureAwait(false);
+                return cast;
+            });
+            try { await Task.WhenAll(ready, player).ConfigureAwait(false); }
+            catch
+            {
+                active.Cts.Cancel();                                  // stop whichever half is still going, then report the first failure
+                try { await Task.WhenAll(ready, player).ConfigureAwait(false); } catch (Exception) { }
+                throw;
+            }
+
             var url = $"http://{_lanIp()}:{_port()}/api/screens/hls/{session.Id}/{StreamCommand.HlsPlaylist}";
-            await cast.PlayLiveAsync(url, $"{_service.GetScreen(screen)!.Name} of this PC", ct).ConfigureAwait(false);
+            await player.Result.PlayLiveAsync(url, $"{_service.GetScreen(screen)!.Name} of this PC", ct).ConfigureAwait(false);
             session.Ended.Register(() => _ = EndAsync(active));
             _log($"Casting {_service.GetScreen(screen)!.Name} to {device.Name}.");
             return session;
@@ -93,12 +107,20 @@ public sealed partial class CastSessionManager
     {
         var playlist = Path.Combine(directory, StreamCommand.HlsPlaylist);
         var deadline = DateTime.UtcNow + _readyTimeout;
-        while (DateTime.UtcNow < deadline)
+        try
         {
-            ct.ThrowIfCancellationRequested();
-            if (run.IsCompleted) throw new CastException("The screen could not be captured. Is FFmpeg working?");
-            try { if (File.Exists(playlist) && File.ReadAllText(playlist).Split("#EXTINF").Length - 1 >= 2) return; } catch (IOException) { /* being written */ }
-            await Task.Delay(100, ct).ConfigureAwait(false);
+            while (DateTime.UtcNow < deadline)
+            {
+                if (run.IsCompleted) throw new CastException("The screen could not be captured. Is FFmpeg working?");
+                ct.ThrowIfCancellationRequested();
+                try { if (File.Exists(playlist) && File.ReadAllText(playlist).Split("#EXTINF").Length - 1 >= 2) return; } catch (IOException) { /* being written */ }
+                await Task.Delay(100, ct).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException) when (run.IsCompleted)
+        {
+            // The capture stopped on its own (and its clean-up cancelled this wait): that is the real reason.
+            throw new CastException("The screen could not be captured. Is FFmpeg working?");
         }
         throw new CastException("The screen did not start in time. Is FFmpeg working?");
     }

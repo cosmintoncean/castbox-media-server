@@ -159,7 +159,7 @@ public sealed class CastSessionManagerTests : IDisposable
         var error = await Assert.ThrowsAsync<CastException>(() => manager.StartAsync(Device, 0, CancellationToken.None));
         Assert.Contains("captured", error.Message);
         Assert.Empty(_service.Sessions);
-        Assert.False(_cast.Launched);
+        await WaitUntil(() => !_cast.Launched || _cast.Disposed); // the player starts alongside the capture; if it did, it is closed again
     }
 
     [Fact]
