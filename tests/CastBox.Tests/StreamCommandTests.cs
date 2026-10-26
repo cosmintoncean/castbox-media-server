@@ -53,6 +53,21 @@ public sealed class StreamCommandTests : IDisposable
     }
 
     [Fact]
+    public void The_Chromecast_form_is_a_live_playlist_of_one_second_pieces_in_a_folder()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "hls-test");
+        var args = StreamCommand.Arguments(new StreamSettings(0, VideoEncoder.X264, new PcmFormat(48000, 2)), folder);
+        Assert.Equal("hls", Value(args, "-f"));
+        Assert.Equal("1", Value(args, "-hls_time"));
+        Assert.Contains("omit_endlist", Value(args, "-hls_flags"));   // live: never ends by itself
+        Assert.Contains("delete_segments", Value(args, "-hls_flags")); // old pieces do not pile up on disk
+        Assert.Equal(Path.Combine(folder, "seg%05d.ts"), Value(args, "-hls_segment_filename"));
+        Assert.Equal(Path.Combine(folder, "stream.m3u8"), args[^1]);
+        Assert.DoesNotContain("pipe:1", args);
+        Assert.Equal("pipe:0", Value(args, "-i")); // sound still arrives on standard input
+    }
+
+    [Fact]
     public void FFmpeg_installed_with_CastBox_wins_over_one_on_the_path()
     {
         var app = Path.Combine(_dir, "app"); var other = Path.Combine(_dir, "other");

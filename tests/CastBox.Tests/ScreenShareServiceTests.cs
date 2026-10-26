@@ -190,6 +190,37 @@ public sealed class ScreenShareServiceTests
     }
 
     [Fact]
+    public void A_TVs_address_is_remembered_so_it_can_be_matched_with_a_Chromecast_found_on_the_network()
+    {
+        var service = Create();
+        service.Touch("tv1", "Chromecast", "192.168.1.11");
+        service.Touch("tv1", "Chromecast"); // a later contact without an address keeps the known one
+        Assert.Equal("192.168.1.11", Assert.Single(service.RecentTvs()).Address);
+    }
+
+    [Fact]
+    public void A_screen_sent_to_a_Chromecast_is_a_session_the_PC_can_stop()
+    {
+        var service = Create();
+        var session = service.BeginExternal("Chromecast", 1);
+        Assert.Equal("Chromecast", Assert.Single(service.Sessions).TvName);
+        service.Stop(session.Id);
+        Assert.True(session.Ended.IsCancellationRequested);
+        service.Close(session);
+        Assert.Empty(service.Sessions);
+    }
+
+    [Fact]
+    public void Ending_a_session_whose_clean_up_closes_it_does_not_trip_over_the_list()
+    {
+        var service = Create();
+        var session = service.BeginExternal("Chromecast", 0);
+        session.Ended.Register(() => service.Close(session)); // what the Chromecast clean-up does
+        service.StopAll();
+        Assert.Empty(service.Sessions);
+    }
+
+    [Fact]
     public void Changes_are_announced_so_the_window_can_refresh()
     {
         var service = Create();

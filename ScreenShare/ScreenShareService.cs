@@ -6,7 +6,7 @@ namespace CastBox.ScreenShare;
 public sealed record ScreenInfo(int Index, string Name, string DeviceName, int Width, int Height, bool Primary);
 
 /// <summary>A TV that has talked to this PC recently.</summary>
-public sealed record TvInfo(string Id, string Name, DateTime LastSeenUtc);
+public sealed record TvInfo(string Id, string Name, DateTime LastSeenUtc, string? Address = null);
 
 public enum ShareStatus { Pending, Approved, Denied, Expired }
 
@@ -94,15 +94,16 @@ public sealed class ScreenShareService
     // TVs --------------------------------------------------------------------------------------------------------
 
     /// <summary>Notes that a TV just made contact, so the PC can offer it as a place to send a screen.</summary>
-    public void Touch(string tvId, string tvName)
+    public void Touch(string tvId, string tvName, string? address = null)
     {
         if (string.IsNullOrWhiteSpace(tvId)) return;
         var name = string.IsNullOrWhiteSpace(tvName) ? "TV" : tvName.Trim();
         bool isNew;
         lock (_lock)
         {
-            isNew = !_tvs.TryGetValue(tvId, out var known) || known.Name != name || Now - known.LastSeenUtc > TvRecentWindow;
-            _tvs[tvId] = new TvInfo(tvId, name, Now);
+            _tvs.TryGetValue(tvId, out var known);
+            isNew = known is null || known.Name != name || Now - known.LastSeenUtc > TvRecentWindow || (address is not null && address != known.Address);
+            _tvs[tvId] = new TvInfo(tvId, name, Now, address ?? known?.Address);
         }
         if (isNew) Changed?.Invoke();
     }
@@ -118,13 +119,16 @@ public sealed class ScreenShareService
     /// <summary>Forgets a TV's permission: it has to ask again, and any stream it has open ends.</summary>
     public void Forget(string tvId)
     {
+        List<ShareSession> ending;
         lock (_lock)
         {
             _allowed.Remove(tvId);
             foreach (var token in _grants.Where(g => g.Value.TvId == tvId).Select(g => g.Key).ToList()) _grants.Remove(token);
-            foreach (var s in _sessions.Where(s => s.TvId == tvId)) s.Cancel();
+            ending = _sessions.Where(s => s.TvId == tvId).ToList();
             Persist();
         }
+        // Cancelling runs the stream's clean-up, which takes the session off the list: so never while holding the lock or iterating it.
+        foreach (var s in ending) s.Cancel();
         Changed?.Invoke();
     }
 
@@ -252,6 +256,18 @@ public sealed class ScreenShareService
         return session;
     }
 
+    /// <summary>
+    /// A screen the PC itself is sending to a Chromecast (Google Cast): there is no TV app and no token, but it is listed
+    /// under "Being watched now" and ends when <see cref="Stop"/> or <see cref="StopAll"/> is used.
+    /// </summary>
+    public ShareSession BeginExternal(string deviceName, int screen)
+    {
+        var session = new ShareSession { Id = NewToken(), TvId = "cast:" + deviceName, TvName = deviceName, Screen = screen, StartedUtc = Now };
+        lock (_lock) _sessions.Add(session);
+        Changed?.Invoke();
+        return session;
+    }
+
     public void Close(ShareSession session)
     {
         lock (_lock) _sessions.Remove(session);
@@ -263,17 +279,21 @@ public sealed class ScreenShareService
     /// <summary>Ends one stream (the TV sees it stop).</summary>
     public void Stop(string sessionId)
     {
-        lock (_lock) foreach (var s in _sessions.Where(s => s.Id == sessionId)) s.Cancel();
+        List<ShareSession> ending;
+        lock (_lock) ending = _sessions.Where(s => s.Id == sessionId).ToList();
+        foreach (var s in ending) s.Cancel();
     }
 
     /// <summary>Ends every stream and cancels every permission that was given for one time only.</summary>
     public void StopAll()
     {
+        List<ShareSession> ending;
         lock (_lock)
         {
-            foreach (var s in _sessions) s.Cancel();
+            ending = _sessions.ToList();
             foreach (var token in _grants.Where(g => !_allowed.ContainsKey(g.Value.TvId)).Select(g => g.Key).ToList()) _grants.Remove(token);
         }
+        foreach (var s in ending) s.Cancel();
         Changed?.Invoke();
     }
 }

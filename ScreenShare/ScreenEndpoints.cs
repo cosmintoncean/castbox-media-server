@@ -21,7 +21,7 @@ public static class ScreenEndpoints
     /// <param name="lanIp">The PC's address as the TV should reach it.</param>
     /// <param name="onWatching">Called when a TV starts watching (the window can tell the person).</param>
     public static void Map(IEndpointRouteBuilder app, ScreenShareService service, IScreenStreamer? streamer, Func<string> lanIp, int port,
-        Action<string> log, Action<ShareSession, string>? onWatching = null, int maxStreams = 3)
+        Action<string> log, Action<ShareSession, string>? onWatching = null, int maxStreams = 3, Func<string, string, string?>? hlsFile = null)
     {
         var slots = new SemaphoreSlim(maxStreams);
         string StreamUrl(int screen, string token) => $"http://{lanIp()}:{port}/api/screens/stream?screen={screen}&token={token}";
@@ -31,9 +31,9 @@ public static class ScreenEndpoints
             streamUrl = r.Status == ShareStatus.Approved && r.Token is not null ? StreamUrl(r.Screen, r.Token) : null,
         };
 
-        app.MapGet("/api/screens", (string? tvId, string? tvName) =>
+        app.MapGet("/api/screens", (string? tvId, string? tvName, HttpContext ctx) =>
         {
-            if (!string.IsNullOrWhiteSpace(tvId)) service.Touch(tvId, tvName ?? "TV");
+            if (!string.IsNullOrWhiteSpace(tvId)) service.Touch(tvId, tvName ?? "TV", ctx.Connection.RemoteIpAddress?.MapToIPv4().ToString());
             return Results.Ok(new
             {
                 available = streamer is not null, sound = true, pcName = Environment.MachineName,
@@ -72,7 +72,7 @@ public static class ScreenEndpoints
             {
                 do
                 {
-                    if (DateTime.UtcNow - lastTouch > TimeSpan.FromSeconds(5)) { service.Touch(tvId, tvName ?? "TV"); lastTouch = DateTime.UtcNow; }
+                    if (DateTime.UtcNow - lastTouch > TimeSpan.FromSeconds(5)) { service.Touch(tvId, tvName ?? "TV", ctx.Connection.RemoteIpAddress?.MapToIPv4().ToString()); lastTouch = DateTime.UtcNow; }
                     if (service.TakePush(tvId) is { } offer)
                         return Results.Ok(new { screen = offer.Screen, name = service.GetScreen(offer.Screen)?.Name, pcName = Environment.MachineName, streamUrl = StreamUrl(offer.Screen, offer.Token) });
                     await Task.Delay(100, ctx.RequestAborted);
@@ -80,6 +80,20 @@ public static class ScreenEndpoints
             }
             catch (OperationCanceledException) { /* the TV went away */ }
             return Results.NoContent();
+        });
+
+        // The live HLS playlist and its pieces for a Chromecast the PC is casting to (the random session id in the path is the secret).
+        app.MapGet("/api/screens/hls/{session}/{file}", (string session, string file, HttpContext ctx) =>
+        {
+            var path = hlsFile?.Invoke(session, file);
+            if (path is null) return Results.NotFound();
+            try
+            {
+                ctx.Response.Headers.CacheControl = "no-store";
+                var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                return Results.File(stream, file.EndsWith(".m3u8") ? "application/vnd.apple.mpegurl" : "video/mp2t");
+            }
+            catch (IOException) { return Results.NotFound(); }
         });
 
         app.MapGet("/api/screens/stream", async (HttpContext ctx, int screen, string? token) =>

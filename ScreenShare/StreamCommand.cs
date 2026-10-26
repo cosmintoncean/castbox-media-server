@@ -10,12 +10,15 @@ public sealed record StreamSettings(int Screen, VideoEncoder Encoder, PcmFormat?
 
 public static class StreamCommand
 {
+    /// <summary>The name of the playlist file in an HLS directory.</summary>
+    public const string HlsPlaylist = "stream.m3u8";
+
     /// <summary>
     /// The FFmpeg arguments that capture monitor <see cref="StreamSettings.Screen"/> (Windows Desktop Duplication), shrink it
     /// to at most <see cref="StreamSettings.MaxWidth"/> pixels wide, encode H.264 with a key frame every second (so a TV can
     /// join quickly) and write an MPEG-TS stream to standard output. Sound, when there is any, arrives as PCM on standard input.
     /// </summary>
-    public static IReadOnlyList<string> Arguments(StreamSettings s)
+    public static IReadOnlyList<string> Arguments(StreamSettings s, string? hlsDirectory = null)
     {
         var args = new List<string> { "-hide_banner", "-loglevel", "error", "-nostats", "-fflags", "+nobuffer" };
         if (s.Audio is { } pcm)
@@ -47,7 +50,16 @@ public static class StreamCommand
         }
         args.AddRange(new[] { "-pix_fmt", "yuv420p" });
         if (s.Audio is not null) args.AddRange(new[] { "-c:a", "aac", "-b:a", "160k", "-ar", "48000", "-ac", "2", "-af", "aresample=async=1:first_pts=0" });
-        args.AddRange(new[] { "-f", "mpegts", "-mpegts_flags", "+resend_headers", "-muxdelay", "0", "-muxpreload", "0", "-flush_packets", "1", "pipe:1" });
+        if (hlsDirectory is null)
+            args.AddRange(new[] { "-f", "mpegts", "-mpegts_flags", "+resend_headers", "-muxdelay", "0", "-muxpreload", "0", "-flush_packets", "1", "pipe:1" });
+        else
+            // A live playlist of one-second pieces, the form a Chromecast's built-in player understands. Old pieces are deleted.
+            args.AddRange(new[]
+            {
+                "-f", "hls", "-hls_time", "1", "-hls_list_size", "6", "-hls_allow_cache", "0",
+                "-hls_flags", "delete_segments+independent_segments+omit_endlist+temp_file",
+                "-hls_segment_filename", Path.Combine(hlsDirectory, "seg%05d.ts"), Path.Combine(hlsDirectory, HlsPlaylist),
+            });
         return args;
     }
 }

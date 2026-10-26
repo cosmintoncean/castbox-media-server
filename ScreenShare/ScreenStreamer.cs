@@ -135,8 +135,14 @@ public sealed class LoopbackAudio : IDisposable
     }
 }
 
+/// <summary>Writes a live HLS playlist of one screen into a folder until cancelled (for Chromecast's built-in player).</summary>
+public interface IHlsStreamer
+{
+    Task RunHlsAsync(int screen, string directory, CancellationToken ct);
+}
+
 /// <summary>Runs FFmpeg for one viewer: capture a screen, encode it, and copy the result to the TV's HTTP response.</summary>
-public sealed class ScreenStreamer : IScreenStreamer
+public sealed class ScreenStreamer : IScreenStreamer, IHlsStreamer
 {
     private readonly string _ffmpeg;
     private readonly Action<string> _log;
@@ -161,6 +167,41 @@ public sealed class ScreenStreamer : IScreenStreamer
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
         try { await process.WaitForExitAsync(timeout.Token).ConfigureAwait(false); return process.ExitCode; }
         catch (OperationCanceledException) { try { process.Kill(true); } catch { } return -1; }
+    }
+
+    /// <summary>Writes an HLS live playlist and its pieces of <paramref name="screen"/> (with sound) into <paramref name="directory"/> until cancelled.</summary>
+    public async Task RunHlsAsync(int screen, string directory, CancellationToken ct)
+    {
+        var encoder = await EncoderAsync().ConfigureAwait(false);
+        Directory.CreateDirectory(directory);
+        using var audio = LoopbackAudio.TryStart();
+        var args = StreamCommand.Arguments(new StreamSettings(screen, encoder, audio?.Format), directory);
+        var psi = new ProcessStartInfo(_ffmpeg)
+        {
+            UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true, RedirectStandardInput = audio is not null,
+        };
+        foreach (var a in args) psi.ArgumentList.Add(a);
+        _log($"Sharing screen {screen + 1} to a Chromecast ({encoder}{(audio is null ? ", no sound" : ", with sound")}).");
+        using var process = Process.Start(psi) ?? throw new InvalidOperationException("FFmpeg could not be started.");
+        var errors = new Queue<string>();
+        _ = Task.Run(async () =>
+        {
+            string? line;
+            while ((line = await process.StandardError.ReadLineAsync().ConfigureAwait(false)) is not null) { lock (errors) { errors.Enqueue(line); while (errors.Count > 8) errors.Dequeue(); } }
+        });
+        _ = process.StandardOutput.ReadToEndAsync();
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var pump = audio?.PumpAsync(process.StandardInput.BaseStream, stop.Token);
+        try { await process.WaitForExitAsync(stop.Token).ConfigureAwait(false); }
+        catch (OperationCanceledException) { /* asked to stop */ }
+        finally
+        {
+            stop.Cancel();
+            try { if (!process.HasExited) process.Kill(true); } catch { }
+            if (pump is not null) { try { await pump.ConfigureAwait(false); } catch { } }
+            string[] last; lock (errors) last = errors.ToArray();
+            if (!ct.IsCancellationRequested && last.Length > 0) _log("FFmpeg said: " + string.Join(" | ", last));
+        }
     }
 
     /// <summary>Streams <paramref name="screen"/> to <paramref name="output"/> until the viewer leaves, <paramref name="ct"/> is cancelled or FFmpeg stops.</summary>
