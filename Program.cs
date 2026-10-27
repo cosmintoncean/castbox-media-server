@@ -192,6 +192,9 @@ internal sealed class CastBoxForm : Form
     private ToolStripMenuItem? _mediaLogMenu, _mlStatus, _mlConnect, _mlConfirm, _mlForget, _mlDisconnect;
     // Screen sharing: a TV may watch one of this PC's screens only after the person here said yes (ScreenShare/).
     private readonly ScreenShareService _screenShare;
+    // Keeps this PC from sleeping while video, pictures or a shared screen are going to a TV.
+    private readonly KeepAwake _keepAwake = new();
+    private readonly System.Windows.Forms.Timer _keepAwakeTimer = new() { Interval = 30_000 };
     private RoundedButton? _shareButton;
     private CastSessionManager? _castManager;
     private bool _ffmpegFound;
@@ -215,6 +218,8 @@ internal sealed class CastBoxForm : Form
         BackColor = Color.FromArgb(25, 27, 32); ForeColor = Color.FromArgb(245, 241, 230);
         Font = new Font("Segoe UI", 10);
         _screenShare = new ScreenShareService(ScreenLister.List, null, _ => SaveSettings(quiet: true));
+        _keepAwakeTimer.Tick += (_, _) => KeepAwake.Apply(_keepAwake.Wanted(_screenShare.Sessions.Count > 0));
+        _keepAwakeTimer.Start();
         _screenShare.Changed += () => { if (IsHandleCreated && !IsDisposed) { try { BeginInvoke(new Action(UpdateShareButton)); } catch (ObjectDisposedException) { } } };
         _screenShare.ApprovalNeeded += request => { if (IsHandleCreated && !IsDisposed) { try { BeginInvoke(new Action(() => AskShareApproval(request))); } catch (ObjectDisposedException) { } } };
         BuildLayout(); LoadSettings(); ApplyTheme();
@@ -225,7 +230,7 @@ internal sealed class CastBoxForm : Form
         trayMenu.Items.Add("Exit", null, async (_, _) => { _tray.Visible = false; await StopServerAsync(); Close(); });
         _tray.Text = "NestCast Server"; _tray.Icon = Icon; _tray.ContextMenuStrip = trayMenu;
         _tray.DoubleClick += (_, _) => { Show(); WindowState = FormWindowState.Normal; Activate(); };
-        FormClosing += async (_, e) => { if (e.CloseReason == CloseReason.UserClosing && _server is not null) { e.Cancel = true; Hide(); _tray.Visible = true; _tray.ShowBalloonTip(1500, "NestCast is running", "The media server continues in the background.", ToolTipIcon.Info); } else { _syncCts.Cancel(); _screenShare.StopAll(); _tray.Visible = false; await StopServerAsync(); } };
+        FormClosing += async (_, e) => { if (e.CloseReason == CloseReason.UserClosing && _server is not null) { e.Cancel = true; Hide(); _tray.Visible = true; _tray.ShowBalloonTip(1500, "NestCast is running", "The media server continues in the background.", ToolTipIcon.Info); } else { _syncCts.Cancel(); _keepAwakeTimer.Stop(); KeepAwake.Release(); _screenShare.StopAll(); _tray.Visible = false; await StopServerAsync(); } };
         Shown += async (_, _) => { _ = Task.Run(() => _mediaLogService.RunAsync(_syncCts.Token)); UpdateMediaLogMenu(); if (_startWithWindows.Checked || _launchInBackground) await StartServerAsync(); if (_launchInBackground && _server is not null) { Hide(); _tray.Visible = true; } };
     }
 
@@ -494,6 +499,12 @@ internal sealed class CastBoxForm : Form
             builder.WebHost.ConfigureKestrel(o => o.Listen(IPAddress.Any, port));
             builder.Services.AddCors(o => o.AddDefaultPolicy(p => p.AllowAnyHeader().AllowAnyMethod().AllowAnyOrigin()));
             var app = builder.Build(); app.UseCors();
+            app.Use(async (ctx, next) =>
+            {
+                if (!KeepAwake.IsStreamingPath(ctx.Request.Path)) { await next(); return; }
+                _keepAwake.Begin();
+                try { await next(); } finally { _keepAwake.End(); }
+            });
             var configuredFolders = _folders.Items.Cast<string>().ToList();
             var personalFolders = _personal.Items.Cast<string>().ToList();
             var supported = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".mp4", ".m4v", ".mov", ".mkv", ".avi", ".webm", ".mpeg", ".mpg", ".ts" };
@@ -741,7 +752,7 @@ internal sealed class CastBoxForm : Form
             MessageBox.Show(this, $"Couldn't open your browser. You can support NestCast at:\n\n{Support.DonateUrl}", "Support NestCast", MessageBoxButtons.OK, MessageBoxIcon.Information);
     }
 
-    private const string CurrentVersion = "0.8.2";
+    private const string CurrentVersion = "0.8.3";
 
     private async Task CheckForUpdatesAsync()
     {

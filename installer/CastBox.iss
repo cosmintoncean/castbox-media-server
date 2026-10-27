@@ -1,5 +1,5 @@
 #define MyAppName "NestCast Server"
-#define MyAppVersion "0.8.2"
+#define MyAppVersion "0.8.3"
 #define MyAppPublisher "NestCast"
 #define MyAppExeName "CastBox.exe"
 
