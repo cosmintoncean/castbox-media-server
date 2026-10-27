@@ -741,7 +741,7 @@ internal sealed class CastBoxForm : Form
             MessageBox.Show(this, $"Couldn't open your browser. You can support NestCast at:\n\n{Support.DonateUrl}", "Support NestCast", MessageBoxButtons.OK, MessageBoxIcon.Information);
     }
 
-    private const string CurrentVersion = "0.8.1";
+    private const string CurrentVersion = "0.8.2";
 
     private async Task CheckForUpdatesAsync()
     {
