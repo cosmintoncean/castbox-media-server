@@ -19,6 +19,8 @@
   <ItemGroup>
     <EmbeddedResource Include="castbox-logo.png" LogicalName="CastBox.castbox-logo.png" />
     <EmbeddedResource Include="CastBox.ico" LogicalName="CastBox.CastBox.ico" />
+    <EmbeddedResource Include="Fonts\SpaceGrotesk-Bold.ttf" LogicalName="CastBox.SpaceGrotesk-Bold.ttf" />
+    <EmbeddedResource Include="Fonts\OFL.txt" LogicalName="CastBox.SpaceGrotesk-OFL.txt" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="NAudio.Wasapi" Version="2.2.1" />

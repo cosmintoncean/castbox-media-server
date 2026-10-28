@@ -18,7 +18,7 @@ The Windows control panel now uses a larger, responsive layout inspired by the N
 
 ## Support
 
-NestCast is free, has no ads and collects nothing. If you like it, you can leave a tip at https://ko-fi.com/comaapps (**Help -> Support NestCast**, or the tray menu).
+NestCast is free, has no ads and collects nothing. If you like it, you can leave a tip at https://ko-fi.com/comaapps (**Support -> Tip jar on Ko-fi**, or the tray menu).
 
 ## Licence
 
