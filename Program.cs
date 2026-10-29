@@ -76,7 +76,7 @@ internal sealed class RoundedButton : Button
         using var glyphFont = new Font("Segoe MDL2 Assets", Font.Size + 1.5f);
         var glyphSize = Glyph.Length > 0 ? TextRenderer.MeasureText(g, Glyph, glyphFont, Size.Empty, measure) : Size.Empty;
         var textSize = TextRenderer.MeasureText(g, Text, Font, Size.Empty, measure);
-        int gap = Glyph.Length > 0 ? (int)(12 * DeviceDpi / 96f) : 0;
+        int gap = Glyph.Length > 0 ? UiScale.Dp(12) : 0;
         int x = (Width - (glyphSize.Width + gap + textSize.Width)) / 2;
         if (Glyph.Length > 0)
         {
@@ -114,7 +114,7 @@ internal sealed class StatusLabel : Label
         base.OnPaint(e);
         e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
         using var brush = new SolidBrush(ForeColor);
-        int dot = (int)(14 * DeviceDpi / 96f);
+        int dot = UiScale.Dp(14);
         e.Graphics.FillEllipse(brush, 2, (Height - dot) / 2, dot, dot);
     }
 }
@@ -141,10 +141,10 @@ internal sealed class BrandHeader : Control
         g.Clear(BackColor);
         g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
         g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
-        int size = Math.Min(Height, (int)(112 * DeviceDpi / 96f));
+        int size = Math.Min(Height, UiScale.Dp(112));
         int top = (Height - size) / 2;
         if (_icon is not null) g.DrawImage(_icon, new Rectangle(0, top, size, size));
-        int textX = size + (int)(14 * DeviceDpi / 96f);
+        int textX = size + UiScale.Dp(14);
         const TextFormatFlags flags = TextFormatFlags.NoPadding | TextFormatFlags.SingleLine;
         using var wordFont = new Font("Segoe UI", 40f, FontStyle.Bold, GraphicsUnit.Point);
         using var tagFont = new Font("Segoe UI Semibold", 16f, FontStyle.Regular, GraphicsUnit.Point);
@@ -202,8 +202,7 @@ internal sealed class CastBoxForm : Form
 
     public CastBoxForm(bool launchInBackground)
     {
-        // Sizes in this window are written for 96 DPI; scale them on high-DPI screens (Windows 11 laptops are often at 125-200%).
-        AutoScaleDimensions = new SizeF(96f, 96f); AutoScaleMode = AutoScaleMode.Dpi;
+        UiScale.Apply(this);
         _launchInBackground = launchInBackground;
         _configPath = Path.Combine(_dataDir, "settings.json");
         Directory.CreateDirectory(_dataDir);
@@ -758,7 +757,7 @@ internal sealed class CastBoxForm : Form
             MessageBox.Show(this, $"Couldn't open your browser. You can support NestCast at:\n\n{Support.DonateUrl}", "Support NestCast", MessageBoxButtons.OK, MessageBoxIcon.Information);
     }
 
-    private const string CurrentVersion = "0.8.4";
+    private const string CurrentVersion = "0.8.5";
 
     private async Task CheckForUpdatesAsync()
     {
@@ -951,9 +950,9 @@ internal sealed class CastBoxForm : Form
     private void Log(string line) { if (_log.IsDisposed) return; _log.AppendText($"[{DateTime.Now:HH:mm:ss}] {line}{Environment.NewLine}"); }
     private void ShowLogWindow()
     {
-        var f = new Form { AutoScaleDimensions = new SizeF(96f, 96f), AutoScaleMode = AutoScaleMode.Dpi, Text = "NestCast server log", Width = 700, Height = 400, StartPosition = FormStartPosition.CenterParent, BackColor = BackColor, ForeColor = ForeColor };
+        var f = new Form { Text = "NestCast server log", Width = 700, Height = 400, StartPosition = FormStartPosition.CenterParent, BackColor = BackColor, ForeColor = ForeColor };
         var copy = new TextBox { Dock = DockStyle.Fill, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Both, Text = _log.Text, BackColor = Color.FromArgb(18, 20, 24), ForeColor = ForeColor };
-        f.Controls.Add(copy); f.Show(this);
+        UiScale.Apply(f); f.Controls.Add(copy); f.Show(this);
     }
     protected override void OnFormClosed(FormClosedEventArgs e) { base.OnFormClosed(e); _log.Dispose(); }
     private sealed class AppSettings { public int Port { get; set; } = 5078; public string? ServerId { get; set; } public List<string> MediaFolders { get; set; } = new(); public List<string> PersonalFolders { get; set; } = new(); public Dictionary<string, string> AllowedTvs { get; set; } = new(); }

@@ -14,8 +14,7 @@ internal static class MediaLogUi
 
     public static void Style(Form form, string title, Size size)
     {
-        // Sizes below are written for 96 DPI; scale them on high-DPI screens (Windows 11 laptops are often at 125-200%).
-        form.AutoScaleDimensions = new SizeF(96f, 96f); form.AutoScaleMode = AutoScaleMode.Dpi;
+        UiScale.Apply(form);
         form.Text = title;
         form.ClientSize = size;
         form.StartPosition = FormStartPosition.CenterParent;

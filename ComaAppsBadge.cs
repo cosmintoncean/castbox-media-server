@@ -49,7 +49,7 @@ internal sealed class ComaAppsBadge : Control
         g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
 
         // The ComaApps mark, scaled from its 64x64 design: a dark tile, a C-shaped arc fading orange to violet, an orange dot.
-        float scale = DeviceDpi / 96f;
+        float scale = UiScale.Factor;
         int size = (int)(30 * scale);
         float k = size / 64f;
         int top = (Height - size) / 2, left = Width - size;
