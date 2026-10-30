@@ -61,11 +61,11 @@ internal sealed class ComaAppsBadge : Control
 
         using var by = new Font("Segoe UI", 8.5f);
         using var name = new Font(Family(), 12.5f, FontStyle.Bold, GraphicsUnit.Point);
-        var muted = Color.FromArgb(155, 153, 173);
+        var muted = BackColor.GetBrightness() > 0.5f ? Color.FromArgb(95, 93, 114) : Color.FromArgb(155, 153, 173);
         var nameSize = TextRenderer.MeasureText(g, "ComaApps", name, Size.Empty, TextFormatFlags.NoPadding);
         var bySize = TextRenderer.MeasureText(g, "by", by, Size.Empty, TextFormatFlags.NoPadding);
         int nameX = left - (int)(8 * scale) - nameSize.Width;
-        TextRenderer.DrawText(g, "ComaApps", name, new Point(nameX, (Height - nameSize.Height) / 2), _hover ? Orange : Color.FromArgb(241, 240, 247), TextFormatFlags.NoPadding);
+        TextRenderer.DrawText(g, "ComaApps", name, new Point(nameX, (Height - nameSize.Height) / 2), _hover ? Orange : (BackColor.GetBrightness() > 0.5f ? Color.FromArgb(35, 37, 42) : Color.FromArgb(241, 240, 247)), TextFormatFlags.NoPadding);
         TextRenderer.DrawText(g, "by", by, new Point(nameX - (int)(6 * scale) - bySize.Width, (Height - bySize.Height) / 2 + 1), muted, TextFormatFlags.NoPadding);
     }
 

@@ -4,6 +4,8 @@ NestCast Server is a free Windows app that shares the movies, shows and pictures
 
 Get the TV app here: [NestCast TV](https://github.com/cosmintoncean/nestcast-tv-android).
 
+![NestCast Server](docs/images/server.png)
+
 ## What it does
 
 - **Share your folders.** Pick the folders with your movies and shows. NestCast keeps them available to your TV automatically.
