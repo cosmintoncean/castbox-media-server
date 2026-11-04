@@ -694,6 +694,16 @@ internal sealed class CastBoxForm : Form
             _ffmpegFound = ffmpegPath is not null;
             var streamer = ffmpegPath is null ? null : new ScreenStreamer(ffmpegPath, LogAny);
             if (streamer is null) LogAny("Screen sharing is off: FFmpeg was not found (see the ffmpeg folder next to CastBox.exe).");
+            // "Skip intro": the TV asks whether a video's own chapters name an intro (see IntroDetector.cs).
+            var introProbe = ffmpegPath is null ? null : IntroProbe.ForFfmpeg(ffmpegPath);
+            app.MapGet("/api/media/{id}/intro", async (string id, CancellationToken ct) =>
+            {
+                var file = FindFile(id);
+                if (file is null) return Results.NotFound();
+                if (introProbe is null) return Results.Json(new { error = "ffmpeg_missing" }, statusCode: StatusCodes.Status503ServiceUnavailable);
+                var intro = await introProbe.FindAsync(file, ct);
+                return intro is null ? Results.NoContent() : Results.Ok(new { startMs = intro.StartMs, endMs = intro.EndMs, title = intro.Title, source = "chapter" });
+            });
             // Casting to a Chromecast through Google Cast: FFmpeg writes an HLS playlist that this server serves to it.
             _castManager = streamer is null ? null : new CastSessionManager(_screenShare, streamer, Lan, () => port,
                 async (address, castPort, ct) => await CastConnection.ConnectAsync(address, castPort, ct), Path.Combine(Path.GetTempPath(), "castbox-hls"), LogAny);
@@ -757,7 +767,7 @@ internal sealed class CastBoxForm : Form
             MessageBox.Show(this, $"Couldn't open your browser. You can support NestCast at:\n\n{Support.DonateUrl}", "Support NestCast", MessageBoxButtons.OK, MessageBoxIcon.Information);
     }
 
-    private const string CurrentVersion = "0.8.5";
+    private const string CurrentVersion = "0.8.6";
 
     private async Task CheckForUpdatesAsync()
     {
