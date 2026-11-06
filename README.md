@@ -42,7 +42,7 @@ Read the full [privacy policy](https://github.com/cosmintoncean/nestcast-tv-andr
 
 ## Support
 
-NestCast is free. If you like it, you can leave a tip on [Ko-fi](https://ko-fi.com/comaapps) (**Support → Tip jar on Ko-fi**). It's made by [ComaApps](https://comaapps.netlify.app/).
+NestCast is free. If you like it, you can leave a tip on [Ko-fi](https://ko-fi.com/comaapps) (**Support → Tip jar on Ko-fi**). It's made by [ComaApps](https://comaapps.dev/).
 
 ## Licence
 

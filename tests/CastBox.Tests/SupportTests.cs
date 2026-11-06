@@ -22,7 +22,7 @@ public class SupportTests
     [Fact]
     public void The_ComaApps_website_opens_in_the_browser()
     {
-        Assert.Equal("https://comaapps.netlify.app/", Support.WebsiteUrl);
+        Assert.Equal("https://comaapps.dev/", Support.WebsiteUrl);
         string? opened = null;
         Assert.True(Support.OpenWebsite(url => { opened = url; return true; }));
         Assert.Equal(Support.WebsiteUrl, opened);

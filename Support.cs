@@ -7,7 +7,7 @@ public static class Support
 {
     public const string DonateUrl = "https://ko-fi.com/comaapps";
 
-    public const string WebsiteUrl = "https://comaapps.netlify.app/";
+    public const string WebsiteUrl = "https://comaapps.dev/";
 
     /// <summary>Opens the donation page in the default browser; returns false when no browser could be started.</summary>
     public static bool OpenDonatePage(Func<string, bool>? open = null) => (open ?? OpenInBrowser)(DonateUrl);
